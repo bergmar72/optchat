@@ -1,0 +1,27 @@
+{
+  "name": "optchat",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "optchat": "./bin/optchat.mjs"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test test/*.test.ts",
+    "start": "tsx src/cli.ts"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "0.131.0",
+    "@modelcontextprotocol/sdk": "1.32.0",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.4",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2"
+  }
+}
