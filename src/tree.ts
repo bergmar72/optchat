@@ -8,17 +8,13 @@ export const leafLine = (m: Msg): string => `${m.kind}: ${m.text}`;
 export function freeLeaf(m: Msg): Node | null {
   if (m.size > NODE) return null; // size is the byte length of the line: no need to build the string to know
   const text = leafLine(m);
-  const size = bytes(text);
-  if (size > NODE) return null;
-  return { l: 0, i: m.i, text, size, kinds: KIND_LETTER[m.kind] };
+  return bytes(text) > NODE ? null : leafNode(m, text);
 }
 
 /** Two children that fit together in NODE bytes ARE the parent. */
 export function freeMerge(l: number, i: number, a: Node, b: Node): Node | null {
   const text = `${a.text}\n${b.text}`;
-  const size = bytes(text);
-  if (size > NODE) return null;
-  return { l, i, text, size, kinds: unionKinds(a.kinds, b.kinds) };
+  return bytes(text) > NODE ? null : mergeNode(l, i, text, a, b);
 }
 
 export function mergeNode(l: number, i: number, text: string, a: Node, b: Node): Node {

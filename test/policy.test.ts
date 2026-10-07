@@ -33,10 +33,13 @@ test("policy: hard denies", () => {
   assert.equal(v("Grep", { pattern: "x" }), "deny"); // no path: would search the run folder
 });
 
-test("policy: a symlink out of ~/work does not escape", () => {
+test("policy: a symlink out of ~/work does not escape (to a folder that exists, through a file name that is not a secret)", () => {
+  fs.mkdirSync(path.join(home, ".ssh"), { recursive: true });
+  fs.writeFileSync(path.join(home, ".ssh", "config"), "Host x");
   const link = path.join(home, "work", "sneaky");
   fs.symlinkSync(path.join(home, ".ssh"), link);
-  assert.equal(v("Read", { file_path: path.join(link, "id_rsa") }), "deny");
+  assert.equal(v("Read", { file_path: path.join(link, "config") }), "deny"); // the NAME is harmless: only the link target gives it away
+  assert.equal(v("Read", { file_path: path.join(home, "work", "plain.txt") }), "allow");
 });
 
 const gitCfg = { ...cfg, bashAllow: ["git status", "git diff", "git log", "ls", "pwd"] };

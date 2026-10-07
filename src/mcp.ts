@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import net from "node:net";
 import { z } from "zod";
+import { connect } from "./client.ts";
 import { TOOL_DESCRIPTIONS } from "./tools.ts";
 
 /**
@@ -10,42 +10,27 @@ import { TOOL_DESCRIPTIONS } from "./tools.ts";
  * the TCP port, the secret in the URL and the per-user port setting.
  */
 export async function runMcpShim(sockPath: string): Promise<void> {
-  const sock = net.connect(sockPath);
-  await new Promise<void>((res, rej) => {
-    sock.once("connect", res);
-    sock.once("error", (e) => rej(new Error(`the OptChat service is not running (${sockPath}): ${e.message}`)));
-  });
-  sock.write(JSON.stringify({ t: "hello", role: "mcp" }) + "\n");
-
+  const conn = await connect(sockPath, { role: "mcp" });
   const waiting = new Map<number, (r: { text: string; error?: boolean }) => void>();
   let nextId = 1;
-  let buf = "";
-  sock.setEncoding("utf8"); // decodes a character split across two chunks correctly
-  sock.on("data", (d: string) => {
-    buf += d;
-    let nl: number;
-    while ((nl = buf.indexOf("\n")) >= 0) {
-      const line = buf.slice(0, nl);
-      buf = buf.slice(nl + 1);
-      try {
-        const m = JSON.parse(line);
-        if (m.t === "result") waiting.get(m.id)?.(m), waiting.delete(m.id);
-      } catch {
-        // not ours
-      }
+  conn.on((m) => {
+    if (m.t === "result") {
+      waiting.get(m.id)?.(m);
+      waiting.delete(m.id);
     }
   });
-  sock.on("close", () => {
+  conn.sock.on("close", () => {
+    // answer the calls still waiting, THEN go: exiting at once would leave them without any reply
     for (const w of waiting.values()) w({ text: "error: the OptChat service went away", error: true });
     waiting.clear();
-    process.exit(1);
+    setTimeout(() => process.exit(1), 50);
   });
 
   const call = (name: string, args: unknown) =>
     new Promise<{ content: { type: "text"; text: string }[]; isError?: boolean }>((resolve) => {
       const id = nextId++;
       waiting.set(id, (r) => resolve({ content: [{ type: "text", text: r.text }], isError: r.error }));
-      sock.write(JSON.stringify({ t: "call", id, name, args }) + "\n");
+      conn.send({ t: "call", id, name, args });
     });
 
   const server = new McpServer({ name: "optchat", version: "0.1.0" });

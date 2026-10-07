@@ -41,7 +41,6 @@ export const PERMANENT_TRIES = 4;
 export interface CompactorOpts {
   jobs?: number;
   retryMs?: number;
-  marks?: number[];
   log?: (msg: string) => void;
 }
 
@@ -62,7 +61,6 @@ export class Compactor {
   private front: number[] = [];
   private jobs: number;
   private retryMs: number;
-  private marks: number[];
   private log: (msg: string) => void;
   private idle: Array<() => void> = [];
   onBuilt?: () => void;
@@ -75,7 +73,6 @@ export class Compactor {
   ) {
     this.jobs = opts.jobs ?? JOBS;
     this.retryMs = opts.retryMs ?? RETRY_MS;
-    this.marks = opts.marks ?? COMPACTOR_MARKS;
     this.log = opts.log ?? ((m) => console.error(m));
   }
 
@@ -149,7 +146,7 @@ export class Compactor {
       l === 0
         ? stepPrompt.leaf(this.store.msgs[i].kind, this.store.msgs[i].text)
         : stepPrompt.merge(flat(a.text), flat(b.text));
-    summarize(this.model, ctx, step, this.marks).then(
+    summarize(this.model, ctx, step).then(
       (text) => {
         this.busy.delete(k);
         if (gen !== this.gen) return this.pump(); // a redaction started meanwhile: discard
@@ -231,4 +228,3 @@ export class Compactor {
   }
 }
 
-export { leafLine };

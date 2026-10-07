@@ -4,10 +4,11 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { AUTONOMY_LIMIT, CAP, CONFIRM_TIMEOUT_MS, KILL_GRACE_MS, MASTER_MARKS, MASTER_TOOLS, STEP_INPUT_CAP } from "./constants.ts";
+import { AUTONOMY_LIMIT, CAP, CONFIRM_TIMEOUT_MS, KILL_GRACE_MS, MASTER_MARKS, MASTER_MODEL, MASTER_TOOLS, OWN_TOOLS, ownToolName, STEP_INPUT_CAP } from "./constants.ts";
 import { appendDurable, ensureDir, readJsonl, writeAtomic } from "./fsx.ts";
 import { commitAll, ensureRepo } from "./git.ts";
 import { indexLinks } from "./links.ts";
+import { onLines } from "./lines.ts";
 import { claimLock } from "./lock.ts";
 import { Memory } from "./memory.ts";
 import { type Model, usage as compactorUsage } from "./model.ts";
@@ -45,7 +46,6 @@ export interface ServiceConf {
   claudeBin?: string;
   masterModel?: string;
   oauthToken?: string;
-  marks?: number[];
   otherHomes?: string[];
   confirmTimeoutMs?: number;
   killGraceMs?: number;
@@ -96,7 +96,6 @@ const newTurnState = (): TurnState => ({ pending: new Map(), order: [], done: ne
 /** `apiKeySource` values that mean the SUBSCRIPTION login (measured: "none" with an OAuth login). Anything else may bill an API key. */
 const SUBSCRIPTION_SOURCES = new Set(["none", "oauth"]);
 const MAX_ITEM_CHARS = 4_000_000;
-const MAX_LINE_CHARS = 64 << 20;
 const userDriven = (i: Item) => i.kind === "user" || !!i.byUser;
 const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 
@@ -115,7 +114,6 @@ export class Service {
   private cancelled = false;
   private waitAbort?: AbortController;
   private sentMid = new Map<string, Item>();
-  private st = newTurnState();
   private seq = 0;
   private ring: Array<{ seq: number; ev: any }> = [];
   private confirms = new Map<string, Confirm>();
@@ -191,21 +189,11 @@ export class Service {
       sock,
       send: (o) => sock.writable && sock.write(JSON.stringify(o) + "\n"),
     };
-    let buf = "";
-    sock.setEncoding("utf8"); // decodes a character split across two chunks correctly
-    sock.on("data", (d: string) => {
-      buf += d;
-      if (buf.length > MAX_LINE_CHARS) return void sock.destroy();
-      let nl: number;
-      while ((nl = buf.indexOf("\n")) >= 0) {
-        const line = buf.slice(0, nl);
-        buf = buf.slice(nl + 1);
-        if (!line.trim()) continue;
-        try {
-          this.onMessage(client, JSON.parse(line));
-        } catch (e: any) {
-          client.send({ ev: "error", text: String(e?.message ?? e) });
-        }
+    onLines(sock, (line) => {
+      try {
+        this.onMessage(client, JSON.parse(line));
+      } catch (e: any) {
+        client.send({ ev: "error", text: String(e?.message ?? e) });
       }
     });
     sock.on("close", () => this.clients.delete(client));
@@ -413,7 +401,7 @@ export class Service {
           break;
         }
         this.nonUserTurns = items.some(userDriven) ? 0 : this.nonUserTurns + 1;
-        const pieces = this.mem.renderPieces(this.conf.marks ?? MASTER_MARKS); // BEFORE logging the new messages
+        const pieces = this.mem.renderPieces(MASTER_MARKS); // BEFORE logging the new messages
         for (const it of items) this.logItem(it);
         await this.runClaude(items, pieces);
         this.turnNo++;
@@ -521,19 +509,19 @@ export class Service {
       "--mcp-config", mcp,
       "--strict-mcp-config",
       "--permission-prompt-tool", "mcp__optchat__approve",
-      "--allowedTools", "mcp__optchat__zoom", "mcp__optchat__date", "mcp__optchat__search",
+      "--allowedTools", ...OWN_TOOLS.map(ownToolName),
       "--tools", MASTER_TOOLS.join(","),
       "--disallowedTools", "Task",
       "--no-session-persistence",
       "--setting-sources", "",
-      "--model", this.conf.masterModel ?? "opus",
+      "--model", this.conf.masterModel ?? MASTER_MODEL,
       ...(this.conf.extraClaudeArgs ?? []),
     ];
   }
 
   private runClaude(items: Item[], pieces: string[]): Promise<void> {
     return new Promise((resolve) => {
-      const st = (this.st = newTurnState());
+      const st = newTurnState();
       const cwd = this.paths.run;
       const args = this.claudeArgs();
       const env = this.childEnv();
@@ -550,36 +538,27 @@ export class Service {
       child.stdin.on("error", () => {});
       child.stdin.write(userLine(blocks, crypto.randomUUID()));
 
-      let buf = "";
       let stderr = "";
-      child.stdout.setEncoding("utf8"); // a multi-byte character can straddle two chunks
       child.stderr.setEncoding("utf8");
-      child.stdout.on("data", (d: string) => {
-        buf += d;
-        let nl: number;
-        while ((nl = buf.indexOf("\n")) >= 0) {
-          const line = buf.slice(0, nl);
-          buf = buf.slice(nl + 1);
-          if (!line.trim()) continue;
-          let ev: any;
-          try {
-            ev = JSON.parse(line);
-          } catch {
-            continue;
-          }
-          try {
-            fs.appendFileSync(journal, JSON.stringify({ ev }) + "\n");
-            this.handleEvent(ev, st);
-          } catch (e: any) {
-            // one odd event must not take the whole service down
-            this.log(`could not handle a ${ev?.type} event from claude: ${e?.message ?? e}`);
-          }
-          if (ev.type === "result") {
-            this.ending = true;
-            child.stdin.end();
-          }
-          if (!st.initOk) this.killChild(child);
+      onLines(child.stdout, (line) => {
+        let ev: any;
+        try {
+          ev = JSON.parse(line);
+        } catch {
+          return;
         }
+        try {
+          fs.appendFileSync(journal, JSON.stringify({ ev }) + "\n");
+          this.handleEvent(ev, st);
+        } catch (e: any) {
+          // one odd event must not take the whole service down
+          this.log(`could not handle a ${ev?.type} event from claude: ${e?.message ?? e}`);
+        }
+        if (ev.type === "result") {
+          this.ending = true;
+          child.stdin.end();
+        }
+        if (!st.initOk) this.killChild(child);
       });
       child.stderr.on("data", (d: string) => (stderr = (stderr + d).slice(-2000)));
       child.on("error", (e) => this.log(`could not start claude: ${e.message}`));

@@ -19,7 +19,9 @@ rl.on("line", async (line) => {
   first = false;
   send({ ...m, isReplay: true });
   const t = text(m);
-  if (/SCRIPT:parallel/.test(t)) {
+  if (/SCRIPT:echo/.test(t)) {
+    say("GOT:" + m.message.content.at(-1).text); // what the agent actually receives as its new message
+  } else if (/SCRIPT:parallel/.test(t)) {
     tool("a1", "Read", { file_path: "/x/a" }); tool("b2", "Bash", { command: "ls" });
     result("b2", "second finished first"); result("a1", "first");
     say("both done");

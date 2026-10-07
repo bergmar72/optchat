@@ -1,8 +1,7 @@
 export const KINDS = ["user", "talk", "step", "work", "file", "note", "fwd"] as const;
 export type Kind = (typeof KINDS)[number];
 
-// One letter per kind, in a fixed order. Shown in the `k` column of the view.
-export const LETTERS = "utswfnx";
+// One letter per kind. Shown in the `k` column of the view.
 export const KIND_LETTER: Record<Kind, string> = {
   user: "u",
   talk: "t",
@@ -12,6 +11,9 @@ export const KIND_LETTER: Record<Kind, string> = {
   note: "n",
   fwd: "x",
 };
+
+/** All the letters, in the fixed order of KINDS. A new kind added to KINDS and KIND_LETTER shows up everywhere, merged lines included. */
+export const LETTERS = KINDS.map((k) => KIND_LETTER[k]).join("");
 
 export interface Msg {
   i: number;
@@ -43,7 +45,7 @@ export const startOf = (l: number, i: number): number => i * 2 ** l;
 
 export function unionKinds(a: string, b: string): string {
   let out = "";
-  for (const c of "utswfnx") if (a.includes(c) || b.includes(c)) out += c;
+  for (const c of LETTERS) if (a.includes(c) || b.includes(c)) out += c;
   return out;
 }
 
@@ -52,7 +54,7 @@ export function cutBytes(s: string, max: number): string {
   const buf = Buffer.from(s, "utf8");
   if (buf.length <= max) return s;
   let out = buf.subarray(0, max).toString("utf8");
-  if (out.endsWith("�")) out = out.slice(0, -1);
+  if (out.endsWith("\uFFFD")) out = out.slice(0, -1); // a character cut in half decodes to U+FFFD
   return out;
 }
 

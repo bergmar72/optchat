@@ -5,16 +5,8 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { forms, redact, verifyGone, watchRedactions } from "../src/redact.ts";
-import { newService } from "./helpers.ts";
+import { haveFilterRepo, newService } from "./helpers.ts";
 
-const haveFilterRepo = (() => {
-  try {
-    execFileSync("git", ["filter-repo", "--version"], { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
-  }
-})();
 
 function grepAll(dir: string, needle: string, skipGit = true): string[] {
   const hits: string[] = [];
@@ -49,7 +41,7 @@ test("redact --literal: gone from the log, the tree, the link index and files; t
 
   assert.deepEqual(grepAll(svc.paths.root, secret), []);
   const left = await verifyGone(svc, forms(secret));
-  if (haveFilterRepo) assert.deepEqual(left, []);
+  if (haveFilterRepo()) assert.deepEqual(left, []);
   else assert.ok(left.every((x) => x.startsWith("git objects")), `only git history may remain without git-filter-repo, got ${left}`);
 
   const m = svc.mem.store.msgs;
@@ -70,7 +62,7 @@ test("redact --literal: gone from the log, the tree, the link index and files; t
   const j = fs.readFileSync(svc.paths.redactions, "utf8");
   assert.ok(!j.includes(secret));
   // "done" only when the git history was rewritten too; without git-filter-repo it stays open
-  if (haveFilterRepo) assert.match(j, /"step":"done"/);
+  if (haveFilterRepo()) assert.match(j, /"step":"done"/);
   else assert.doesNotMatch(j, /"step":"done"/);
   assert.equal(svc.locked, false);
 });
@@ -80,7 +72,6 @@ test("redact --whole: the message becomes (redacted), its kind and date stay, an
   for (let i = 0; i < 8; i++) svc.mem.add(i === 3 ? "user" : "talk", `message ${i} ` + "w".repeat(700));
   await svc.mem.compactor.whenIdle();
   const date = svc.mem.store.msgs[3].date;
-  const before = svc.mem.store.node(3, 0)!.text;
   await redact(svc, { id: 3, whole: true });
   await svc.mem.compactor.whenIdle();
   const m = svc.mem.store.msgs[3];
@@ -90,13 +81,17 @@ test("redact --whole: the message becomes (redacted), its kind and date stay, an
   assert.equal(svc.mem.store.node(0, 3)!.text, "user: (redacted)");
   assert.ok(svc.mem.store.node(3, 0)); // ancestors still built
   assert.equal(svc.mem.compactor.dirty.size, 0);
-  void before;
 });
 
-test("redact: an unknown id and a second run at once are refused", async () => {
+test("redact: an unknown id is refused, and so is a second run while one is going", async () => {
   const svc = newService();
-  svc.mem.add("user", "x");
+  svc.mem.add("user", "x " + "y".repeat(400));
   await assert.rejects(redact(svc, { id: 5, whole: true }), /no message 5/);
+  assert.equal(svc.locked, false);
+  const first = redact(svc, { id: 0, whole: true });
+  assert.equal(svc.locked, true, "the lock is taken synchronously");
+  await assert.rejects(redact(svc, { id: 0, whole: true }), /already running/);
+  await first;
   assert.equal(svc.locked, false);
 });
 

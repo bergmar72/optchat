@@ -1,5 +1,8 @@
 import path from "node:path";
 
+/** The launcher: every service file, the MCP shim and the hook run it. */
+export const launcherPath = (codeDir: string): string => path.join(codeDir, "bin", "optchat.mjs");
+
 export interface Paths {
   root: string;
   chat: string;

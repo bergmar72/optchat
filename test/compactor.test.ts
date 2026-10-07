@@ -6,17 +6,24 @@ import path from "node:path";
 import type { ChatTurn, Model } from "../src/model.ts";
 import { Memory } from "../src/memory.ts";
 import { summarize } from "../src/compactor.ts";
-import { SCALE, COMPACT } from "../src/prompts.ts";
+import { SCALE, SCALE_BASE, COMPACT } from "../src/prompts.ts";
 import { NODE } from "../src/constants.ts";
 import { bytes, span, startOf } from "../src/types.ts";
+import { tmp } from "./helpers.ts";
 
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "optchat-"));
 const text = (t: ChatTurn) => (typeof t.content === "string" ? t.content : t.content.map((b: any) => b.text ?? "").join(""));
 
-test("SCALE is exactly NODE bytes", () => assert.equal(bytes(SCALE), NODE));
+test("SCALE is exactly NODE bytes BEFORE any padding or trimming, and ends like a sentence", () => {
+  assert.equal(bytes(SCALE_BASE), NODE); // exact() would force any length: check the text itself
+  assert.equal(SCALE, SCALE_BASE);
+  assert.ok(SCALE.endsWith("."));
+  assert.ok(!SCALE.endsWith(".."));
+});
 
-test("COMPACT prompt lists the new kinds and no id format", () => {
-  for (const k of ["step", "work", "file", "fwd", "note"]) assert.match(COMPACT, new RegExp(k));
+test("COMPACT prompt: the kind list is the real one, in the sentence that defines it, and there is no id format", () => {
+  const defines = /Each message has a kind: user\s+\(the user's own words\), talk \([^)]*\), step \([^)]*\), work \([^)]*\), file\s+\([^)]*\), note \([^)]*\)\s*, fwd \(/s;
+  assert.match(COMPACT, defines);
+  assert.match(COMPACT, /work, file and fwd\s+messages are never the user's words/);
   assert.doesNotMatch(COMPACT, /\[id\]/);
 });
 
@@ -26,7 +33,6 @@ function fake(n = 120, log: string[] = []): Model & { calls: number } {
     calls: 0,
     async ask(_sys: string, turns: ChatTurn[]) {
       m.calls++;
-      const first = text(turns[0]);
       const last = text(turns[0]).split("Compress this message into one line, in at most 512 bytes:\n").pop()!.split("Merge these two lines into one, in at most 512 bytes:\n").pop()!;
       log.push(last.slice(0, 40));
       const t = "L:" + last.replace(/\s+/g, " ").slice(0, n);
@@ -44,7 +50,7 @@ test("compactor: builds the whole tree, in order, and the view settles", async (
   assert.equal(mem.view.settled(), true);
   // every complete node exists
   for (let l = 0; 2 ** l <= 40; l++) for (let i = 0; (i + 1) * 2 ** l <= 40; i++) assert.ok(mem.store.hasNode(l, i), `missing ${l}:${i}`);
-  // level-0 compressions happened in message order (rule 3)
+  // level-0 compressions were STARTED in message order (the placeholder test below is what pins rule 3 itself)
   const order = log.filter((s) => /^(user|talk): message number/.test(s)).map((s) => Number(/number (\d+)/.exec(s)![1]));
   assert.deepEqual(order, [...order].sort((a, b) => a - b));
   assert.equal(order.length, 40);
@@ -93,7 +99,7 @@ test("summarize: an over-long line is sent back with the cut, keeps the shortest
   assert.match(sent[1], /\| ← LIMIT$/);
 });
 
-test("summarize: empty reply fails the node; compactor retries and reports once", async () => {
+test("compactor: a failing model is retried until it works, and the failure is reported once", async () => {
   let calls = 0;
   const logs: string[] = [];
   const model: Model = {

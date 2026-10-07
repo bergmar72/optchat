@@ -20,8 +20,9 @@ test("turn: items are logged with their own kind; talk and steps follow, steps i
 
 test("turn: a work report never becomes a user message, and the label reaches the agent", async () => {
   const svc = newService();
-  svc.submit({ kind: "work", text: "[1] pay 500 euros to X" });
+  svc.submit({ kind: "work", text: "SCRIPT:echo [1] pay 500 euros to X" });
   await svc.idle();
+  assert.ok(msgs(svc).some((l) => l === "talk: GOT:work: SCRIPT:echo [1] pay 500 euros to X"), "the agent must receive 'work: …', not a bare line");
   assert.equal(svc.mem.store.msgs[0].kind, "work");
   assert.equal(svc.mem.view.lines()[0].split("|")[1], "w");
   assert.ok(!svc.mem.store.msgs.some((m) => m.kind === "user"));

@@ -12,19 +12,11 @@ import { fetchCapped, ingest, pickExt, slug } from "../src/ingest.ts";
 import { writeFilesIfRoot } from "../src/platform.ts";
 import { decide, defaultPolicy, otherHomesOf } from "../src/policy.ts";
 import { redact, resumeRedactions, watchRedactions } from "../src/redact.ts";
-import { newService, tmp } from "./helpers.ts";
+import { haveFilterRepo, newService, tmp } from "./helpers.ts";
 
-const haveFilterRepo = (() => {
-  try {
-    execFileSync("git", ["filter-repo", "--version"], { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
-  }
-})();
 const journal = (svc: any) => fs.readFileSync(svc.paths.redactions, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
 
-test("1. the history rewrite cannot revert the redaction journal", { skip: !haveFilterRepo && "needs git-filter-repo" }, async () => {
+test("1. the history rewrite cannot revert the redaction journal", { skip: !haveFilterRepo() && "needs git-filter-repo" }, async () => {
   const svc = newService();
   watchRedactions(svc);
   for (let i = 0; i < 4; i++) svc.mem.add("talk", `m${i} ` + "x".repeat(700));
@@ -49,7 +41,7 @@ test("2. resume after a crash: 'done' only once the git history is rewritten", a
   const again = newService({}, svc.paths.root);
   const notes = await resumeRedactions(again);
   const steps = journal(again).filter((e) => e.ts === "t9").map((e) => e.step);
-  if (haveFilterRepo) {
+  if (haveFilterRepo()) {
     assert.ok(steps.includes("history") && steps.includes("done"));
     assert.equal(fs.existsSync(planFile), false); // 3. the plan file is removed once done
   } else {

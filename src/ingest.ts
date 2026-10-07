@@ -4,6 +4,7 @@ import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { promisify } from "node:util";
+import { CAP } from "./constants.ts";
 import { localDay } from "./fsx.ts";
 import { decide } from "./policy.ts";
 import type { Service } from "./service.ts";
@@ -113,8 +114,10 @@ function resolveUrl(u: string): string {
  * summarizes them like all others. The tree is never written to directly.
  * The record gives ABSOLUTE paths: the agent works elsewhere and cannot guess the root.
  */
+export const isLink = (s: string): boolean => /^(https?:\/\/|doi:)/i.test(s);
+
 export async function ingest(svc: Service, src: string, note?: string): Promise<string> {
-  const isUrl = /^https?:\/\//i.test(src) || /^doi:/i.test(src);
+  const isUrl = isLink(src);
   const day = localDay(new Date());
   let title: string;
   let ext: string;
@@ -175,8 +178,8 @@ export async function ingest(svc: Service, src: string, note?: string): Promise<
   }
 
   const lines = [`title: ${oneLine(title, 200)}`, `path: ${dest}`];
-  if (textFile && textFile !== dest) lines.push(`text: ${textFile} (${txt.length} chars; read it in parts of at most 30000 characters)`);
-  else if (textFile) lines.push(`(${txt.length} chars; read it in parts of at most 30000 characters)`);
+  if (textFile && textFile !== dest) lines.push(`text: ${textFile} (${txt.length} chars; read it in parts of at most ${CAP} characters)`);
+  else if (textFile) lines.push(`(${txt.length} chars; read it in parts of at most ${CAP} characters)`);
   if (source) lines.push(`source: ${oneLine(source)}`);
   if (note) svc.submit({ kind: "user", byUser: true, text: note }); // the user's caption is their own words, logged as such
   svc.submit({ kind: "file", byUser: true, text: lines.join("\n") });

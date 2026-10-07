@@ -1,6 +1,6 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
+import { launcherPath } from "./paths.ts";
 
 /**
  * Everything that differs between macOS and Linux lives here. Nothing else
@@ -41,7 +41,7 @@ export const sdq = (s: string): string => `"${sdEsc(s)}"`;
 export const xml = (s: string): string => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 export function systemdUnit(o: InstallOpts): string {
-  const bin = path.join(o.codeDir, "bin", "optchat.mjs");
+  const bin = launcherPath(o.codeDir);
   return `[Unit]
 Description=OptChat for %i
 After=network-online.target
@@ -78,7 +78,7 @@ WantedBy=multi-user.target
 }
 
 export function systemdBackup(o: InstallOpts): { service: string; timer: string } {
-  const bin = path.join(o.codeDir, "bin", "optchat.mjs");
+  const bin = launcherPath(o.codeDir);
   return {
     service: `[Unit]
 Description=OptChat backup for %i
@@ -110,7 +110,7 @@ function plistArgs(args: string[]): string {
 
 export function launchdPlist(o: InstallOpts): string {
   const home = homeOf("darwin", o.user);
-  const bin = path.join(o.codeDir, "bin", "optchat.mjs");
+  const bin = launcherPath(o.codeDir);
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -140,7 +140,7 @@ export function launchdPlist(o: InstallOpts): string {
 
 export function launchdBackupPlist(o: InstallOpts): string {
   const home = homeOf("darwin", o.user);
-  const bin = path.join(o.codeDir, "bin", "optchat.mjs");
+  const bin = launcherPath(o.codeDir);
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -219,10 +219,6 @@ export function installPlan(p: Platform, o: InstallOpts): ServiceFiles {
       "Rotate service.log with newsyslog.",
     ],
   };
-}
-
-export function readHostFacts(): string[] {
-  return [`platform: ${process.platform} ${os.arch()}`, `node: ${process.version}`];
 }
 
 /**

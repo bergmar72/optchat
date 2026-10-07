@@ -14,7 +14,7 @@ covered by Phase 0.
 
 ## 0. Implementation status (2026-10-05)
 
-Built and tested on Linux x64 (`npm test`: 128 tests; `node test/e2e.mjs` and
+Built and tested on Linux x64 (`npm test`: 151 tests; `node test/e2e.mjs` and
 `node test/probe-cache.mjs` run against the real `claude`). Phase 0 results are in
 [docs/cli-findings.md](docs/cli-findings.md).
 
@@ -46,7 +46,7 @@ Built and tested on Linux x64 (`npm test`: 128 tests; `node test/e2e.mjs` and
 
 ### Review round: what was fixed (Tier 1 and Tier 2), 2026-10-05
 
-Eleven agents reviewed the code; their ~60 distinct findings were reproduced or checked and fixed with tests (now 128 unit tests, a live end-to-end run against the real `claude` with 11 checks, and the cache probe).
+Eleven agents reviewed the code; their ~60 distinct findings were reproduced or checked and fixed with tests (now 151 unit tests, a live end-to-end run against the real `claude` with 11 checks, and the cache probe).
 
 - **Durability.** Short writes are looped (`appendDurable`, `writeAtomic`); a failed append is cut back; a torn tail is dropped from the file at load; a bad line in the MIDDLE of the log, a gap in the ids, or an unknown kind **refuses to start** instead of silently losing what follows. Base-spec `tool`/`echo` kinds load as steps. A message is written to `run/inbox.jsonl` before `submit()` returns and answered after a crash (once).
 - **Compactor.** Its context is bare text (no `id+n|k|`). A failed retry keeps the earlier tries; a node that fails the same way 4 times gets a marked mechanical line so one poison message cannot block the chat; an exception while saving is retried; the fallback-disable race is gone; usage is counted for refused calls; text before a fallback block is ignored.
@@ -59,7 +59,11 @@ Eleven agents reviewed the code; their ~60 distinct findings were reproduced or 
 ### Known remaining (not fixed)
 
 - **No OS isolation for the agent.** The harness and `claude` run as the same user. After the user approves a command, that command can read `secrets/` (including the client token and the API key). The path policy and the token are a bar, not a wall. A real fix is a Bash sandbox (Claude Code's `sandbox` settings, bwrap/sandbox-exec) or a separate uid for the agent.
-- **Tier 3 from the review:** mutation testing left ~30 mutants alive in view/compactor tests; the socket line reader is still copied in four places; some dead exports; startup fold is ~11 s at 100,000 messages and the log is held in memory (~2.3x its size); every message costs several fsyncs.
+- **Tier 3 from the review: done**, except two items kept on purpose. (1) Every message still costs several fsyncs: free tree nodes could skip theirs, but a power cut could then leave a zero-filled tail in a tree file, and the loader refuses to start on a bad line, so the saving is not worth that risk. (2) The whole log is held in memory: a 50,000-message chat takes 158 MB of heap (measured), so a 400,000-message chat would need a bigger Node heap or an on-disk index.
+  - Mutation testing: 34 hand-made mutants of the view, tree, compactor, model and store code, from the review's survivor list; every one is now killed by the suite (the runner was a throwaway script; re-create mutants from the list in the review notes if needed). The tests that could not fail were fixed (SCALE, "fold equals live", the symlink test, "second redaction refused", the label the agent receives).
+  - One reader for newline-framed JSON (`src/lines.ts`: linear, UTF-8 safe) is used by the service, the clients, the MCP shim and `claude`'s stdout. The kind alphabet, node builders, the `id+n|k|text` line format (`renderLine`, shared with `zoom`), the "never touch this path" rule (`denyReason`), our own tool names and the launcher path each exist once.
+  - Dead code and unused options removed. `SUBAGENT` (the Phase 9 prompt) is removed; re-add it from optchat.md section 9 when subagents are built.
+  - Startup: nodes are indexed per level by number; folding a 50,000-message chat takes 0.8 s (was 1.3 s) and 158 MB (was 239 MB).
 - **Not tested in a real terminal:** `attach` Ctrl-C ("stop turn? y/N") now uses a TTY readline, covered only by reasoning.
 
 ### Not verified

@@ -106,7 +106,7 @@ export class Store {
       this.readLines(file).forEach((line, idx) => {
         const n = this.parseLine<Node>(file, line, idx + 1);
         const k = key(n.l, n.i);
-        this.nodes.set(k, n); // a later line replaces an earlier one
+        this.setNode(n); // a later line replaces an earlier one
         this.nodeFile.set(k, file);
       });
     }
@@ -127,12 +127,22 @@ export class Store {
     return m;
   }
 
+  /**
+   * The one place a node enters memory. `nodes` (by "l:i") serves callers that iterate or already hold a key;
+   * `byLevel` serves the hot lookups (the view asks hundreds of times per message) without building a string each time.
+   */
+  private setNode(n: Node): void {
+    this.nodes.set(key(n.l, n.i), n);
+    (this.byLevel[n.l] ??= new Map()).set(n.i, n);
+  }
+  private byLevel: Array<Map<number, Node>> = [];
+
   hasNode(l: number, i: number): boolean {
-    return this.nodes.has(key(l, i));
+    return this.byLevel[l]?.has(i) ?? false;
   }
 
   node(l: number, i: number): Node | undefined {
-    return this.nodes.get(key(l, i));
+    return this.byLevel[l]?.get(i);
   }
 
   /** Save a node. A node that already exists is replaced in place. */
@@ -145,7 +155,7 @@ export class Store {
     }
     const file = path.join(this.treeDir, `${localDay(now)}.jsonl`);
     appendDurable(file, JSON.stringify(n) + "\n");
-    this.nodes.set(k, n);
+    this.setNode(n);
     this.nodeFile.set(k, file);
   }
 
@@ -192,7 +202,7 @@ export class Store {
       touched.add(file);
     }
     for (const m of msgs.values()) this.msgs[m.i] = m;
-    for (const [k, n] of nodes) this.nodes.set(k, n);
+    for (const n of nodes.values()) this.setNode(n);
     return [...touched];
   }
 

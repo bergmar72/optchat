@@ -4,7 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import { haveRestic, resticBackup, resticRestore } from "./backup.ts";
 import { ctl } from "./client.ts";
-import { COMPACTOR_MARKS } from "./constants.ts";
+import { isLink } from "./ingest.ts";
+import { haveFilterRepo } from "./redact.ts";
 import { installPlan, detect, writeFilesIfRoot } from "./platform.ts";
 import type { Paths } from "./service.ts";
 import { Store } from "./store.ts";
@@ -14,12 +15,11 @@ import { cutPieces, View } from "./view.ts";
 
 interface Ctx {
   paths: Paths;
-  root: string;
   codeDir: string;
 }
 
 /** The service runs elsewhere (cwd "/" under systemd): resolve a local path HERE, in the user's shell. */
-export const absSrc = (src: string): string => (/^(https?:\/\/|doi:)/i.test(src) ? src : path.resolve(process.cwd(), src));
+export const absSrc = (src: string): string => (isLink(src) ? src : path.resolve(process.cwd(), src));
 
 const USAGE = `optchat <command>
 
@@ -103,9 +103,9 @@ function doctor(ctx: Ctx): void {
     ["node >= 22", parseInt(process.versions.node) >= 22 ? process.version : null, true],
     ["claude", have("claude"), true],
     ["git", have("git"), true],
-    ["git-filter-repo (redaction of git history)", have("git", ["filter-repo", "--version"]), false],
+    ["git-filter-repo (redaction of git history)", haveFilterRepo() ? "ok" : null, false],
     ["pdftotext (papers)", have("pdftotext", ["-v"]) ?? (fs.existsSync("/usr/bin/pdftotext") ? "ok" : null), false],
-    ["restic (off-host backup)", have("restic", ["version"]), false],
+    ["restic (off-host backup)", haveRestic(ctx.paths) ? "ok" : have("restic", ["version"]) ? "installed, but secrets/restic.env is missing" : null, false],
     ["rg (optional, not required)", have("rg"), false],
   ];
   for (const [name, v, required] of rows) console.log(`${v ? "ok     " : required ? "MISSING" : "absent "} ${name}${v ? `  ${v}` : ""}`);
@@ -171,4 +171,3 @@ async function restoreTest(paths: Paths): Promise<void> {
   }
 }
 
-void COMPACTOR_MARKS;

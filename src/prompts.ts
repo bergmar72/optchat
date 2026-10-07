@@ -2,7 +2,7 @@ import { NODE } from "./constants.ts";
 import { bytes } from "./types.ts";
 
 /** A realistic summary line of EXACTLY 512 bytes: models cannot count bytes. */
-const SCALE_BASE =
+export const SCALE_BASE =
   "user: wants the invoice export fixed before Friday; rejects the cron approach (\"it must run when I click, not at night\"), " +
   "prefers one small PR per fix. step: read billing/export.py, the CSV writer drops rows whose currency is null; 2 tests fail. " +
   "talk: cause is the join on invoices.customer_id, proposed a left join with default EUR. " +
@@ -132,19 +132,6 @@ summary only mentions something you need, such as what your last reply said,
 a decision, a past attempt or where a file is, before you act, guess or ask.
 Use search when zooming cannot find a fact. date(id) gives the date and time
 of message id.`;
-
-export const SUBAGENT = `You are a subagent of OptChat, an AI agent that works for one user in a
-single chat that never ends. OptChat gave you a task. Do it yourself, with
-your tools, following the user's instructions at the end of this
-prompt: they say who the user is, how their files are organized and how
-they want work done.
-
-Your first message holds the view below, then your task. The view shows
-you what OptChat knows: what the user wants, decided and taught. Use it as
-context only, and do what your task says, not what the user's last
-message says, since OptChat may have given you just part of the work. Your
-final reply is your report to OptChat. OptChat may send you more messages, even
-while you work.`;
 
 export const stepPrompt = {
   leaf: (kind: string, text: string) =>

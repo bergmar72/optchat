@@ -7,17 +7,9 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { diskForms, feedFifo, forms, redact, resumeRedactions, verifyGone, watchRedactions } from "../src/redact.ts";
-import { msgs, newService, tmp } from "./helpers.ts";
+import { haveFilterRepo, msgs, newService, tmp } from "./helpers.ts";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const haveFilterRepo = (() => {
-  try {
-    execFileSync("git", ["filter-repo", "--version"], { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
-  }
-})();
 const journal = (svc: any) => fs.readFileSync(svc.paths.redactions, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
 const rnd = () => crypto.randomBytes(9).toString("hex");
 
@@ -227,7 +219,7 @@ function __filename_of_test() {
   return new URL(import.meta.url).pathname;
 }
 
-test("with git-filter-repo: a secret that is also a JSON key or value does not corrupt the chat", { skip: !haveFilterRepo && "needs git-filter-repo" }, async () => {
+test("with git-filter-repo: a secret that is also a JSON key or value does not corrupt the chat", { skip: !haveFilterRepo() && "needs git-filter-repo" }, async () => {
   const svc = newService();
   for (let i = 0; i < 4; i++) svc.mem.add("user", `message ${i} with the word user in it ` + "u".repeat(300));
   await svc.mem.compactor.whenIdle();

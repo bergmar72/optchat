@@ -21,4 +21,8 @@ export function newService(env: Record<string, string> = {}, root = tmp()): Serv
     new TruncModel(),
   );
 }
+import { execFileSync } from "node:child_process";
+
+/** Same probe the product uses, so tests branch on the same condition as the code. */
+export { haveFilterRepo } from "../src/redact.ts";
 export const msgs = (svc: Service) => svc.mem.store.msgs.map((m) => `${m.kind}: ${m.text}`);

@@ -1,5 +1,5 @@
 import { Compactor, type CompactorOpts } from "./compactor.ts";
-import { COMPACTOR_MARKS, VIEW } from "./constants.ts";
+import { MASTER_MARKS, VIEW } from "./constants.ts";
 import type { Model } from "./model.ts";
 import { Store } from "./store.ts";
 import { freeLeaf } from "./tree.ts";
@@ -38,7 +38,7 @@ export class Memory {
   }
 
   /** The view as it is NOW, as text pieces (render BEFORE logging a new message). */
-  renderPieces(marks = COMPACTOR_MARKS): string[] {
+  renderPieces(marks = MASTER_MARKS): string[] {
     return cutPieces(this.view.lines(), marks);
   }
 

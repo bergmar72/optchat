@@ -7,8 +7,8 @@ import { Store } from "../src/store.ts";
 import { View, cutPieces } from "../src/view.ts";
 import { freeLeaf, freeMerge, leafNode, mergeNode } from "../src/tree.ts";
 import { bytes, startOf, span } from "../src/types.ts";
+import { tmp } from "./helpers.ts";
 
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "optchat-"));
 
 // Build a complete tree over n messages with fake (model-free) summaries.
 function buildAll(store: Store, n: number, lineLen = 200) {

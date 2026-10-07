@@ -27,12 +27,7 @@ export class View {
 
   /** Render one line of the view. */
   line(p: Part): string {
-    const n = span(p.l);
-    const node = this.store.node(p.l, p.i);
-    const start = startOf(p.l, p.i);
-    if (node) return `${start}+${n}|${node.kinds}|${flat(node.text)}`;
-    const m = this.store.msgs[p.i];
-    return `${start}+${n}|${m ? KIND_LETTER[m.kind] : ""}|${PLACEHOLDER}`;
+    return renderLine(this.store, p);
   }
 
   private lineBytes(p: Part): number {
@@ -150,6 +145,16 @@ export class View {
   }
 }
 
+/** `id+n|k|text` for a part: the format of the view AND of what `zoom` returns, so they cannot drift apart. */
+export function renderLine(store: Store, p: Part): string {
+  const n = span(p.l);
+  const node = store.node(p.l, p.i);
+  const start = startOf(p.l, p.i);
+  if (node) return `${start}+${n}|${node.kinds}|${flat(node.text)}`;
+  const m = p.l === 0 ? store.msgs[p.i] : undefined; // only a level-0 part can be unbuilt, and only it indexes a message
+  return `${start}+${n}|${m ? KIND_LETTER[m.kind] : ""}|${PLACEHOLDER}`;
+}
+
 /**
  * Cut the rendered view into pieces at the last line end before each mark
  * (in characters). Concatenating the pieces gives `<chat>\n…\n</chat>`.
@@ -169,7 +174,7 @@ export function cutPieces(lines: string[], marks: number[]): string[] {
   }
   const cuts = new Set<number>();
   let last = -1;
-  for (const m of marks) {
+  for (const m of [...marks].sort((a, b) => a - b)) { // unsorted marks must not silently drop cuts
     let k = -1;
     for (let j = 0; j < ends.length && ends[j] <= m; j++) k = j;
     if (k < 0 || k + 1 >= lines.length || k <= last) continue; // past the end, or no new piece

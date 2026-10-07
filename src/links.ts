@@ -29,10 +29,3 @@ export function indexLinks(file: string, id: number, date: string, text: string)
   return rows.length;
 }
 
-export function linkCount(file: string): number {
-  try {
-    return fs.readFileSync(file, "utf8").split("\n").filter(Boolean).length;
-  } catch {
-    return 0;
-  }
-}

@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { pathsFor } from "./paths.ts";
+import { launcherPath, pathsFor } from "./paths.ts";
 
 // absolute: the shim and the hook run in another folder and must find the same socket
 const root = path.resolve(process.env.OPTCHAT_HOME ?? path.join(os.homedir(), "optchat"));
@@ -57,9 +57,9 @@ async function serve(): Promise<void> {
     {
       root,
       codeDir,
-      mcpCommand: [process.execPath, path.join(codeDir, "bin", "optchat.mjs"), "mcp"],
+      mcpCommand: [process.execPath, launcherPath(codeDir), "mcp"],
       claudeBin: process.env.OPTCHAT_CLAUDE ?? "claude",
-      masterModel: process.env.OPTCHAT_MODEL ?? "opus",
+      masterModel: process.env.OPTCHAT_MODEL,
       oauthToken,
       otherHomes: otherHomesOf(os.homedir()),
       extraClaudeArgs: process.env.OPTCHAT_EXTRA_ARGS?.split(" ").filter(Boolean),
@@ -115,7 +115,7 @@ async function main(): Promise<void> {
     }
     default: {
       const { runOther } = await import("./commands.ts");
-      return runOther(cmd, rest, { paths, root, codeDir });
+      return runOther(cmd, rest, { paths, codeDir });
     }
   }
 }

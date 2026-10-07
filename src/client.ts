@@ -2,6 +2,7 @@ import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import readline from "node:readline";
+import { onLines } from "./lines.ts";
 
 export interface Conn {
   send(o: any): void;
@@ -23,23 +24,14 @@ export function connect(sockPath: string, hello: any): Promise<Conn> {
   return new Promise((resolve, reject) => {
     const sock = net.connect(sockPath);
     const handlers: Array<(m: any) => void> = [];
-    let buf = "";
-    sock.setEncoding("utf8"); // decodes a character split across two chunks correctly
-    sock.on("data", (d: string) => {
-      buf += d;
-      let nl: number;
-      while ((nl = buf.indexOf("\n")) >= 0) {
-        const line = buf.slice(0, nl);
-        buf = buf.slice(nl + 1);
-        if (!line.trim()) continue;
-        let m: any;
-        try {
-          m = JSON.parse(line);
-        } catch {
-          continue;
-        }
-        for (const h of handlers) h(m); // a throwing handler is the caller's bug: let it show
+    onLines(sock, (line) => {
+      let m: any;
+      try {
+        m = JSON.parse(line);
+      } catch {
+        return;
       }
+      for (const h of handlers) h(m); // a throwing handler is the caller's bug: let it show
     });
     sock.once("error", (e) => reject(new Error(`cannot reach the OptChat service at ${sockPath}: ${e.message}`)));
     sock.once("connect", () => {

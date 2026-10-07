@@ -21,6 +21,10 @@ export const MASTER_MARKS = [64_000];
 // Artifact*, ...): anything that can act outside the harness's reach stays off.
 export const MASTER_TOOLS = ["Bash", "Read", "Edit", "Write", "Glob", "Grep", "WebFetch", "WebSearch"];
 
+/** Our own MCP tools. Always allowed by the policy and by --allowedTools; listed here once. */
+export const OWN_TOOLS = ["zoom", "date", "search"] as const;
+export const ownToolName = (n: string): string => `mcp__optchat__${n}`;
+
 export const AUTONOMY_LIMIT = 3; // consecutive turns not started by the user
 export const CONFIRM_TIMEOUT_MS = 15 * 60_000;
 /** A child that ignores SIGINT gets SIGTERM after this, and SIGKILL after twice this. */

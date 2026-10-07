@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Memory } from "./memory.ts";
-import { flat, span } from "./types.ts";
+import { flat } from "./types.ts";
+import { renderLine } from "./view.ts";
 
 export const TOOL_DESCRIPTIONS = {
   zoom: "Open the line id+n of the view into the two lines of n/2 under it; n = 1 gives the message whole.",
@@ -40,13 +41,7 @@ export class Tools {
     const l = Math.log2(n);
     const i = id / n;
     if (!this.mem.store.hasNode(l, i)) return `No line ${id}+${n}.`;
-    return [0, 1]
-      .map((k) => {
-        const c = this.mem.store.node(l - 1, 2 * i + k);
-        if (!c) return `${id + k * (n / 2)}+${n / 2}|(not summarized yet: zoom it)`;
-        return `${(2 * i + k) * span(l - 1)}+${span(l - 1)}|${c.kinds}|${flat(c.text)}`;
-      })
-      .join("\n");
+    return [0, 1].map((k) => renderLine(this.mem.store, { l: l - 1, i: 2 * i + k })).join("\n");
   }
 
   date(id: number): string {

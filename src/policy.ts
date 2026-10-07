@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { OWN_TOOLS, ownToolName } from "./constants.ts";
 import { caseFold } from "./platform.ts";
 
 export type Decision = { verdict: "allow"; updatedInput?: any } | { verdict: "deny"; why: string } | { verdict: "ask"; why: string };
@@ -26,7 +27,7 @@ export class PolicyError extends Error {}
 
 const READ_TOOLS = new Set(["Read", "Glob", "Grep"]);
 const WRITE_TOOLS = new Set(["Edit", "Write", "NotebookEdit", "MultiEdit"]);
-const OWN_TOOLS = new Set(["mcp__optchat__zoom", "mcp__optchat__date", "mcp__optchat__search"]);
+const OWN_TOOL_NAMES = new Set(OWN_TOOLS.map(ownToolName));
 
 /** Strings longer than this are not examined: the answer is "ask". Keeps every check linear and cheap. */
 const MAX_LEN = 4096;
@@ -99,6 +100,14 @@ export function real(p: string, hops = 0): string {
   return cur;
 }
 
+/** The one rule for "never touch this": why a RESOLVED path is off limits, or undefined. */
+function denyReason(p: string, cfg: PolicyConfig): string | undefined {
+  if (nameVerdict(p) === "deny") return `${path.basename(p)} looks like a secret file`;
+  for (const d of cfg.protect) if (inside(p, d)) return `${p} is protected`;
+  for (const d of cfg.otherHomes) if (inside(p, d)) return `${p} belongs to another user`;
+  return undefined;
+}
+
 /** `~` and relative paths as Claude Code itself reads them: against the home folder and against ITS working directory. */
 export function expandPath(raw: string, cfg: PolicyConfig): string {
   const home = cfg.home ?? os.homedir();
@@ -163,11 +172,9 @@ function bashAutoAllowed(cmd: string, cfg: PolicyConfig): { ok: boolean; deny?: 
     if (/^\d+$/.test(t)) continue;
     if (!t.startsWith("/")) return { ok: false }; // relative or bare name: where it points is unknown
     const r = real(t);
-    const nv = nameVerdict(r);
-    if (nv === "deny") return { ok: false, deny: `${path.basename(r)} looks like a secret file` };
-    for (const d of cfg.protect) if (inside(r, d)) return { ok: false, deny: `touches ${d}` };
-    for (const d of cfg.otherHomes) if (inside(r, d)) return { ok: false, deny: `touches another user's home ${d}` };
-    if (nv === "ask" || !inside(r, cfg.work)) return { ok: false };
+    const dr = denyReason(r, cfg);
+    if (dr) return { ok: false, deny: dr };
+    if (nameVerdict(r) === "ask" || !inside(r, cfg.work)) return { ok: false };
   }
   return { ok: true };
 }
@@ -218,10 +225,9 @@ function decideFile(tool: string, input: any, cfg: PolicyConfig): Decision {
   for (const raw of raws) {
     if (raw.length > MAX_LEN) return { verdict: "ask", why: `${tool}: a very long path` };
     const p = real(expandPath(raw, cfg));
+    const dr = denyReason(p, cfg);
+    if (dr) return { verdict: "deny", why: dr };
     const nv = nameVerdict(p);
-    if (nv === "deny") return { verdict: "deny", why: `${path.basename(p)} looks like a secret file` };
-    for (const d of cfg.protect) if (inside(p, d)) return { verdict: "deny", why: `${p} is protected` };
-    for (const d of cfg.otherHomes) if (inside(p, d)) return { verdict: "deny", why: `${p} belongs to another user` };
     // a folder that CONTAINS protected places (a search of the whole home folder, of /): no
     if (isSearch) for (const d of [...cfg.protect, ...cfg.otherHomes]) if (inside(real(d), p) && real(d) !== p) return { verdict: "deny", why: `${p} contains the protected folder ${d}` };
     if (nv === "ask") wantAsk ??= `${tool} ${show(p)}: the name looks like it holds a secret`;
@@ -245,7 +251,7 @@ function decideFile(tool: string, input: any, cfg: PolicyConfig): Decision {
  * other users' homes, secret files. Everything else asks, with the whole request shown.
  */
 export function decide(tool: string, input: any, cfg: PolicyConfig): Decision {
-  if (OWN_TOOLS.has(tool)) return { verdict: "allow" };
+  if (OWN_TOOL_NAMES.has(tool)) return { verdict: "allow" };
   if (tool === "Bash") return decideBash(String(input?.command ?? ""), cfg);
   if (READ_TOOLS.has(tool) || WRITE_TOOLS.has(tool)) return decideFile(tool, input, cfg);
   return { verdict: "ask", why: `${show(tool, 80)} ${show(JSON.stringify(input ?? {}))}` };
