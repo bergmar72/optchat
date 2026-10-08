@@ -49,7 +49,7 @@ test("secrets that JSON escapes (quotes, backslash, newline) are found everywher
   svc.mem.add("talk", "context " + "c".repeat(300));
   const bad = svc.mem.add("user", `password is ${secret} ok https://example.org/a end ` + "u".repeat(600));
   // the agent used it in a tool call: the step embeds JSON.stringify(input), so it is escaped TWICE on disk
-  svc.mem.add("step", `Bash ${JSON.stringify({ command: `echo '${secret}'` })}\n→ done ` + "s".repeat(600));
+  svc.mem.add("tool", `Bash ${JSON.stringify({ command: `echo '${secret}'` })}\n→ done ` + "s".repeat(600));
   fs.writeFileSync(svc.paths.links, JSON.stringify({ date: "d", id: bad.i, url: "https://example.org/a", context: `password is ${secret} ok` }) + "\n");
   fs.writeFileSync(path.join(svc.paths.files, "notes.md"), `remember: ${secret}\n`);
   fs.writeFileSync(path.join(svc.paths.files, "scan.pdf"), Buffer.concat([Buffer.from("%PDF-1.4 "), Buffer.from(secret)]));

@@ -22,7 +22,7 @@ test("the compactor's context holds bare text: no ids, no kind column", async ()
   await mem.compactor.whenIdle();
   assert.ok(seen.length > 5);
   for (const s of seen) {
-    const ctx = s.slice(0, s.lastIndexOf("For scale"));
+    const ctx = s.slice(0, s.lastIndexOf("Compaction:"));
     assert.doesNotMatch(ctx, /^\d+\+\d+\|/m, "an id prefix reached the compactor");
     assert.doesNotMatch(ctx, /^[utswfnx]+\|/m, "a kind column reached the compactor");
     assert.match(ctx, /^<chat>\n/);
@@ -49,18 +49,18 @@ test("a poison message gets a mechanical line after a few identical failures, an
   const logs: string[] = [];
   const model: Model = {
     async ask(_s, turns) {
-      if (/Compress this message[^]*step: POISON/.test(text(turns[0]))) throw new PermanentError("refused (cyber)"); // only the leaf
+      if (/compress message \d+[^]*tool: POISON/.test(text(turns[0]))) throw new PermanentError("refused (cyber)"); // only the leaf
       return { text: "ok line", content: [{ type: "text", text: "ok line" }] };
     },
   };
   const mem = new Memory(tmp(), model, { budget: 4000, retryMs: 2, log: (m) => logs.push(m) });
-  mem.add("step", "before " + "x".repeat(800));
-  mem.add("step", "POISON " + "p".repeat(800));
-  for (let i = 0; i < 6; i++) mem.add("step", `after ${i} ` + "y".repeat(800));
+  mem.add("tool", "before " + "x".repeat(800));
+  mem.add("tool", "POISON " + "p".repeat(800));
+  for (let i = 0; i < 6; i++) mem.add("tool", `after ${i} ` + "y".repeat(800));
   await mem.compactor.whenIdle();
   assert.ok(mem.view.settled());
   const n = mem.store.node(0, 1)!;
-  assert.match(n.text, /^\[not summarized: refused \(cyber\)\] step: POISON/);
+  assert.match(n.text, /^\[not summarized: refused \(cyber\)\] tool: POISON/);
   assert.ok(Buffer.byteLength(n.text) <= 512);
   assert.ok(logs.some((l) => /could not be summarized/.test(l)));
   assert.equal(logs.filter((l) => /failed:/.test(l)).length, 1); // the first failure is reported once
@@ -72,7 +72,7 @@ test("a write error while storing a node is retried, not an unhandled rejection"
   const real = mem.store.putNode.bind(mem.store);
   let failed = 0;
   mem.store.putNode = ((n: any) => (failed++ < 2 ? (() => { throw new Error("ENOSPC"); })() : real(n))) as any;
-  mem.add("step", "z".repeat(900));
+  mem.add("tool", "z".repeat(900));
   await mem.compactor.whenIdle();
   assert.ok(failed >= 3);
   assert.ok(mem.view.settled());
@@ -85,34 +85,20 @@ function fakeClient(handler: (kind: "beta" | "plain", body: any) => Promise<any>
 }
 const ok = (t: string, extra: any = {}) => ({ content: [{ type: "text", text: t }], stop_reason: "end_turn", usage: { input_tokens: 3, output_tokens: 2 }, ...extra });
 
-test("AnthropicModel: when the API rejects fallbacks, ALL concurrent calls retry without them", async () => {
-  const model = new AnthropicModel(
-    fakeClient(async (kind) => {
-      await new Promise((r) => setTimeout(r, 5));
-      if (kind === "beta") throw badRequest("fallbacks: unsupported");
-      return ok("line");
-    }),
-  );
-  const results = await Promise.allSettled(Array.from({ length: 8 }, () => model.ask("sys", [{ role: "user", content: "x" }])));
-  assert.equal(results.filter((r) => r.status === "fulfilled").length, 8);
-  assert.equal(model.fallbacks, false);
-});
-
-test("AnthropicModel: request shape, usage counted even for refusals, text only after a fallback block", async () => {
+test("AnthropicModel: the compactor's model, no effort or fallbacks, usage counted even for refusals", async () => {
   let body: any;
   const model = new AnthropicModel(
     fakeClient(async (_k, b) => {
       body = b;
-      return { content: [{ type: "text", text: "partial from decliner" }, { type: "fallback" }, { type: "text", text: "real line" }], stop_reason: "end_turn", usage: { input_tokens: 10, output_tokens: 5 } };
+      return ok("a line", { usage: { input_tokens: 10, output_tokens: 5 } });
     }),
   );
   const before = usage.calls;
   const r = await model.ask("sys", [{ role: "user", content: "x" }]);
-  assert.equal(r.text, "real line");
-  assert.equal(body.model, "claude-sonnet-5-5");
-  assert.deepEqual(body.output_config, { effort: "medium" });
-  assert.equal(body.fallbacks, "default");
-  assert.deepEqual(body.betas, ["server-side-fallback-2026-07-01"]);
+  assert.equal(r.text, "a line");
+  assert.equal(body.model, "claude-haiku-4-5");
+  assert.equal(body.output_config, undefined); // Haiku 4.5 rejects an effort setting
+  assert.equal(body.fallbacks, undefined);
   assert.equal(body.system[0].cache_control.type, "ephemeral");
   assert.equal(usage.calls, before + 1);
 
@@ -123,9 +109,7 @@ test("AnthropicModel: request shape, usage counted even for refusals, text only 
   for (const stop of ["max_tokens", "model_context_window_exceeded"])
     await assert.rejects(new AnthropicModel(fakeClient(async () => ok("cut", { stop_reason: stop }))).ask("s", []), PermanentError);
   await assert.rejects(new AnthropicModel(fakeClient(async () => ok("x", { stop_reason: "pause_turn" }))).ask("s", []), (e: any) => !e.permanent);
-  const other400 = new AnthropicModel(fakeClient(async () => { throw badRequest("prompt is too long"); }));
-  other400.fallbacks = false;
-  await assert.rejects(other400.ask("s", []), PermanentError);
+  await assert.rejects(new AnthropicModel(fakeClient(async () => { throw badRequest("prompt is too long"); })).ask("s", []), PermanentError);
 });
 
 test("capHeadTail never leaves a lone surrogate; the log never stores one", () => {

@@ -14,7 +14,7 @@ covered by Phase 0.
 
 ## 0. Implementation status (2026-10-05)
 
-Built and tested on Linux x64 (`npm test`: 151 tests; `node test/e2e.mjs` and
+Built and tested on Linux x64 (`npm test`: 155 tests; `node test/e2e.mjs` and
 `node test/probe-cache.mjs` run against the real `claude`). Phase 0 results are in
 [docs/cli-findings.md](docs/cli-findings.md).
 
@@ -46,7 +46,7 @@ Built and tested on Linux x64 (`npm test`: 151 tests; `node test/e2e.mjs` and
 
 ### Review round: what was fixed (Tier 1 and Tier 2), 2026-10-05
 
-Eleven agents reviewed the code; their ~60 distinct findings were reproduced or checked and fixed with tests (now 151 unit tests, a live end-to-end run against the real `claude` with 11 checks, and the cache probe).
+Eleven agents reviewed the code; their ~60 distinct findings were reproduced or checked and fixed with tests (now 155 unit tests, a live end-to-end run against the real `claude` with 11 checks, and the cache probe).
 
 - **Durability.** Short writes are looped (`appendDurable`, `writeAtomic`); a failed append is cut back; a torn tail is dropped from the file at load; a bad line in the MIDDLE of the log, a gap in the ids, or an unknown kind **refuses to start** instead of silently losing what follows. Base-spec `tool`/`echo` kinds load as steps. A message is written to `run/inbox.jsonl` before `submit()` returns and answered after a crash (once).
 - **Compactor.** Its context is bare text (no `id+n|k|`). A failed retry keeps the earlier tries; a node that fails the same way 4 times gets a marked mechanical line so one poison message cannot block the chat; an exception while saving is retried; the fallback-disable race is gone; usage is counted for refused calls; text before a fallback block is ignored.
@@ -55,6 +55,28 @@ Eleven agents reviewed the code; their ~60 distinct findings were reproduced or 
 - **Redaction.** Validated before anything stops; the chat repo is rewritten **only** by id (a raw replace of `user` or `2026` used to corrupt it); JSON-escaped forms, 3 base64 alignments and lower-case percent-forms are found, in step texts too; links are rebuilt from the cleaned text; the ring buffer is emptied; other open plans are cleaned of the secret; a stale plan is not applied over a changed line; `done` needs history, backup, verification and a finished rebuild; the pre-redaction commit must succeed; the FIFO writer never parks a thread; an unreadable place counts as "not clean". The journal tolerates a torn line.
 - **Ingest.** Absolute paths in the record (the agent could not open saved files before); names and errors are one line; private/loopback/link-local addresses and every redirect hop are refused; secret files are refused by the same policy as the agent's reads; `pdftotext` and downloads are bounded and never block the loop.
 - **Operations.** `restic` is async; `import` is chunked and respects the lock; systemd words are quoted/escaped, `ProtectProc=invisible`, `~/.claude` created, other-home paths warned about; the plist is XML-escaped; the installer rolls back; `attach` works from a pipe and with Ctrl-C in a terminal; `redact --literal` reads the secret without echo; `ctl()` fails loudly if the service drops.
+
+### Spec update (optchat.md rewritten, applied 2026-10-08)
+
+The spec changed in four places. Implemented as written:
+
+- **View merge order (section 3):** the due rule is `(T - last) / 2^l` (last = the pair's last message). With the push list's length as budget it makes exactly Taelin's merges at every one of 20,000 steps (`test/push.test.ts`). The age from a pair's *first* message is wrong (the spec says so; the old code used it).
+- **Batch sawtooth:** the chat view grows from 64 KB to 128 KB and one batch merges it back to 64 KB (`VIEW_LOW`). Bug found while testing: the batch was armed only when a line was appended, but a line grows when its summary arrives, so the view never shrank. The check now runs in `drain`, too.
+- **`view.json`:** saved after every change, loaded at start. Never refolded from the log. A damaged or out-of-step file falls back to a fold.
+- **Tool calls and results:** the `step` kind is gone. `tool` is logged when the call starts, `echo` when its result arrives. A call with no result when the turn ends or the harness restarts gets `echo: (no result: …)`.
+- **Compactions (section 4):** task text and 512-dash ruler as the spec words them; the "Too long" reply; at most 5 tries, the shortest kept; a call sees the *compaction view* (a second view, 32 KB down to 16 KB) up to its node, stopping at the first unbuilt line; a message starts once fewer than 8 messages before it are unbuilt (`UNBUILT_AHEAD`); a failed call is tried again at the next message (a 10 s timer as fallback, since a turn waits for every node).
+- **Prompt (section 5):** one system prompt for turns and compactions (`SYSTEM` in `src/prompts.ts`). The compactor sends it too.
+- **Compactor model:** `claude-haiku-4-5`, no `effort` and no fallbacks (Haiku 4.5 rejects `effort`; the spec's "Haiku at xhigh" cannot be sent as written).
+
+**Not applied: the spec's choices that conflict with other decisions. Need your call:**
+
+1. **Names.** The spec is "UniiChat" with agent "Unii" and kind `unii`. The repo is OptChat with kind `talk`. Kept OptChat / `talk`. Rename the project, or keep?
+2. **Kinds `file` and `fwd`** are not in the spec. Kept: `fwd` keeps other people's text from looking like the user's (PLAN D2), and `file` is how saved papers reach the agent. Keep both?
+3. **The `k` column** in the view (`id+n|k|text`): the spec drops it. Kept, because the setup spec (section 6.1) requires kind metadata on each view line.
+4. **The `search` tool.** The spec allows only `zoom`/`date`. Kept, because the setup spec (section 6.1) requires raw search. The prompt says to use it only when zoom cannot find a fact.
+5. **Compaction cache.** The spec has compactions read the turns' cache (same prefix, same model). Here the master runs on the subscription (Opus/Sonnet) and the compactor on the API (Haiku), and caches are per model and per account. So compactions do not share the master's cache. This cannot be fixed inside the spec; it costs API tokens for the compaction view on every call.
+6. **Compactor quality.** Haiku 4.5 with no effort, not "Haiku at xhigh". Check summary quality on a real chat before trusting it.
+7. **Not yet done:** "or when the chat's view merges" (the compaction view merges on its own schedule); the `work` format `[Name]` (no subagents yet). The "fewer than 8 unbuilt lines" rule counts messages, not view lines (after merges there are fewer lines).
 
 ### Known remaining (not fixed)
 

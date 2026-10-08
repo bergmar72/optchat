@@ -28,7 +28,7 @@ test("redact --literal: gone from the log, the tree, the link index and files; t
   watchRedactions(svc); // the service installs this at startup: it closes the journal once the rebuild is done
   for (let i = 0; i < 6; i++) svc.mem.add("talk", `ordinary message ${i} ` + "o".repeat(700));
   const bad = svc.mem.add("user", `my key is ${secret} please use it; also see https://x.org/p?token=${secret} ` + "b".repeat(700));
-  svc.mem.add("step", `curl -H "Authorization: ${secret}" https://api.example.com ` + "c".repeat(700)); // an echo of it
+  svc.mem.add("tool", `curl -H "Authorization: ${secret}" https://api.example.com ` + "c".repeat(700)); // an echo of it
   for (let i = 0; i < 5; i++) svc.mem.add("talk", `later message ${i} ` + "l".repeat(700));
   fs.writeFileSync(path.join(svc.paths.links, "..", "links.jsonl"), JSON.stringify({ id: bad.i, date: "d", url: `https://x.org/p?token=${secret}`, context: "k" }) + "\n");
   fs.writeFileSync(path.join(svc.paths.files, "notes.txt"), `remember ${secret}\n`);

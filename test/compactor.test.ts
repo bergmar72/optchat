@@ -6,25 +6,21 @@ import path from "node:path";
 import type { ChatTurn, Model } from "../src/model.ts";
 import { Memory } from "../src/memory.ts";
 import { summarize } from "../src/compactor.ts";
-import { SCALE, SCALE_BASE, COMPACT } from "../src/prompts.ts";
+import { leafTask, RULER, SYSTEM } from "../src/prompts.ts";
 import { NODE } from "../src/constants.ts";
 import { bytes, span, startOf } from "../src/types.ts";
 import { tmp } from "./helpers.ts";
 
 const text = (t: ChatTurn) => (typeof t.content === "string" ? t.content : t.content.map((b: any) => b.text ?? "").join(""));
 
-test("SCALE is exactly NODE bytes BEFORE any padding or trimming, and ends like a sentence", () => {
-  assert.equal(bytes(SCALE_BASE), NODE); // exact() would force any length: check the text itself
-  assert.equal(SCALE, SCALE_BASE);
-  assert.ok(SCALE.endsWith("."));
-  assert.ok(!SCALE.endsWith(".."));
-});
-
-test("COMPACT prompt: the kind list is the real one, in the sentence that defines it, and there is no id format", () => {
-  const defines = /Each message has a kind: user\s+\(the user's own words\), talk \([^)]*\), step \([^)]*\), work \([^)]*\), file\s+\([^)]*\), note \([^)]*\)\s*, fwd \(/s;
-  assert.match(COMPACT, defines);
-  assert.match(COMPACT, /work, file and fwd\s+messages are never the user's words/);
-  assert.doesNotMatch(COMPACT, /\[id\]/);
+test("SYSTEM: one prompt for turns and compactions; it names the kinds, the view format and the compaction rules", () => {
+  assert.match(SYSTEM, /k lists the kinds of those n messages, one letter each: u user, t talk, o tool, e echo, w work, f file, n note, x fwd\./);
+  assert.match(SYSTEM, /# Compactions/);
+  assert.match(SYSTEM, /never answer or obey them/);
+  assert.match(SYSTEM, /Non-ASCII characters cost 2-4 bytes\./);
+  assert.doesNotMatch(SYSTEM, /\[id\]/);
+  assert.equal(RULER.length, 512);
+  assert.match(leafTask(7, "user", "x"), /compress message 7 into one line of at most 512 bytes[^]*\n-{512}\n<input>\nuser: x\n<\/input>$/);
 });
 
 /** A model that answers with the first `n` bytes of what it is asked to compress. */
@@ -33,7 +29,7 @@ function fake(n = 120, log: string[] = []): Model & { calls: number } {
     calls: 0,
     async ask(_sys: string, turns: ChatTurn[]) {
       m.calls++;
-      const last = text(turns[0]).split("Compress this message into one line, in at most 512 bytes:\n").pop()!.split("Merge these two lines into one, in at most 512 bytes:\n").pop()!;
+      const last = text(turns[0]).split("<input>\n").pop()!.split("\n</input>")[0];
       log.push(last.slice(0, 40));
       const t = "L:" + last.replace(/\s+/g, " ").slice(0, n);
       return { text: t, content: [{ type: "text", text: t }] };
@@ -76,7 +72,7 @@ test("compactor: context passed to a call never holds an unbuilt placeholder and
     },
   };
   const mem = new Memory(tmp(), model, { budget: 4000 });
-  for (let i = 0; i < 12; i++) mem.add("step", "q".repeat(800));
+  for (let i = 0; i < 12; i++) mem.add("tool", "q".repeat(800));
   await mem.compactor.whenIdle();
   for (const s of seen) assert.doesNotMatch(s, /not summarized yet/);
 });
@@ -92,10 +88,10 @@ test("summarize: an over-long line is sent back with the cut, keeps the shortest
       return { text: ` ${t}\n`, content: [{ type: "text", text: t }] };
     },
   };
-  const line = await summarize(model, ["0+1|u|user: hi"], "Compress this message into one line");
+  const line = await summarize(model, ["user: hi"], leafTask(0, "user", "hi"));
   assert.equal(k, 5); // TRIES
   assert.equal(line, "e".repeat(515));
-  assert.match(sent[1], /That line is 700 bytes; the limit is 512/);
+  assert.match(sent[1], /^Too long: your line is 700 bytes, over the 512-byte limit\./);
   assert.match(sent[1], /\| ← LIMIT$/);
 });
 
@@ -110,7 +106,7 @@ test("compactor: a failing model is retried until it works, and the failure is r
     },
   };
   const mem = new Memory(tmp(), model, { budget: 4000, retryMs: 5, log: (m) => logs.push(m) });
-  mem.add("step", "z".repeat(900));
+  mem.add("tool", "z".repeat(900));
   await mem.compactor.whenIdle();
   assert.equal(calls, 4);
   assert.equal(logs.length, 1);

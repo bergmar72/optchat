@@ -160,9 +160,10 @@ async function restoreTest(paths: Paths): Promise<void> {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "optchat-restore-"));
   try {
     await resticRestore(paths, tmp);
+    // the view the master would see: the SAVED view.json, as the service loads it (never refolded)
     const restored = path.join(tmp, paths.root, "chat");
-    const a = View.fold(Store.open(restored, true));
-    const b = View.fold(Store.open(paths.chat, true));
+    const a = View.load(Store.open(restored, true), path.join(restored, "view.json")).view;
+    const b = View.load(Store.open(paths.chat, true), path.join(paths.chat, "view.json")).view;
     const same = a.lines().join("\n") === b.lines().join("\n");
     console.log(same ? `ok: the restored chat loads the same view (${a.parts.length} lines)` : "DIFFERENT: the restored view differs from the live one (a newer live state is expected if turns ran since the snapshot)");
     process.exitCode = same ? 0 : 2;

@@ -1,11 +1,12 @@
-export const KINDS = ["user", "talk", "step", "work", "file", "note", "fwd"] as const;
+export const KINDS = ["user", "talk", "tool", "echo", "work", "file", "note", "fwd"] as const;
 export type Kind = (typeof KINDS)[number];
 
 // One letter per kind. Shown in the `k` column of the view.
 export const KIND_LETTER: Record<Kind, string> = {
   user: "u",
   talk: "t",
-  step: "s",
+  tool: "o",
+  echo: "e",
   work: "w",
   file: "f",
   note: "n",

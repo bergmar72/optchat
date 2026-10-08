@@ -1,6 +1,7 @@
 // Sizes are UTF-8 bytes (or characters, for cache marks), never tokens.
 export const NODE = 512; // target size of one summary line
-export const VIEW = 128_000; // budget of the view
+export const VIEW = 128_000; // the view is merged down from here ...
+export const VIEW_LOW = 64_000; // ... to here, in one batch (the sawtooth)
 export const JOBS = 8; // compactor calls at once
 export const TRIES = 5; // attempts per node to get under NODE
 export const RETRY_MS = 10_000; // wait before retrying a failed node
@@ -30,5 +31,11 @@ export const CONFIRM_TIMEOUT_MS = 15 * 60_000;
 /** A child that ignores SIGINT gets SIGTERM after this, and SIGKILL after twice this. */
 export const KILL_GRACE_MS = 4_000;
 
-export const COMPACTOR_MODEL = "claude-sonnet-5-5";
+/** Compactions: a cheap model (optchat.md section 4). Haiku 4.5 takes no `effort` setting and no fallbacks. */
+export const COMPACTOR_MODEL = "claude-haiku-4-5";
+/** A message's node starts once fewer than this many messages before it are still unbuilt. */
+export const UNBUILT_AHEAD = 8;
+/** The compaction view (what a compaction reads), sawtooth from 32 KB down to 16 KB. */
+export const COMPACTION_VIEW_HIGH = 32_000;
+export const COMPACTION_VIEW_LOW = 16_000;
 export const MASTER_MODEL = "opus";

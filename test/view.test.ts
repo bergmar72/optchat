@@ -13,7 +13,7 @@ import { tmp } from "./helpers.ts";
 // Build a complete tree over n messages with fake (model-free) summaries.
 function buildAll(store: Store, n: number, lineLen = 200) {
   for (let i = 0; i < n; i++) {
-    const m = store.appendMsg(i % 3 === 0 ? "user" : i % 3 === 1 ? "talk" : "step", `message ${i} ` + "x".repeat(300));
+    const m = store.appendMsg(i % 3 === 0 ? "user" : i % 3 === 1 ? "talk" : "tool", `message ${i} ` + "x".repeat(300));
     store.putNode(freeLeaf(m) ?? leafNode(m, `S${i} ` + "y".repeat(lineLen)));
   }
   for (let l = 1; 2 ** l <= n; l++)
@@ -60,7 +60,7 @@ test("tree: free leaf and free merge need no model", () => {
   const p = freeMerge(1, 0, na, nb)!;
   assert.equal(p.text, "user: short\ntalk: also short");
   assert.equal(p.kinds, "ut");
-  assert.equal(freeLeaf(s.appendMsg("step", "x".repeat(600))), null);
+  assert.equal(freeLeaf(s.appendMsg("tool", "x".repeat(600))), null);
 });
 
 test("view: tiles the chat, stays under budget, and the start is stable across appends", () => {
@@ -105,10 +105,10 @@ test("view: fold at load equals the live view when all nodes exist", () => {
 
 test("view: an unbuilt part renders a placeholder, and settle waits for it", async () => {
   const s = Store.open(tmp());
-  const m = s.appendMsg("step", "x".repeat(900));
+  const m = s.appendMsg("tool", "x".repeat(900));
   const v = new View(s);
   v.append(0);
-  assert.match(v.lines()[0], /^0\+1\|s\|\(not summarized yet/);
+  assert.match(v.lines()[0], /^0\+1\|o\|\(not summarized yet/);
   assert.equal(v.first(), 0);
   let done = false;
   const p = v.settle().then((r) => ((done = true), r));
@@ -118,7 +118,7 @@ test("view: an unbuilt part renders a placeholder, and settle waits for it", asy
   v.nodeBuilt();
   assert.equal(await p, true);
   const ac = new AbortController();
-  s.appendMsg("step", "y".repeat(900));
+  s.appendMsg("tool", "y".repeat(900));
   v.append(1);
   const q = v.settle(ac.signal);
   ac.abort();

@@ -107,14 +107,14 @@ test("store: a gap in the ids refuses to start; a duplicate id keeps the first",
   assert.throws(() => Store.open(dir), /messages are missing/);
 });
 
-test("store: the base spec's tool/echo kinds load as steps; an unknown kind refuses", () => {
+test("store: tool and echo load as they are; an unknown kind refuses", () => {
   const dir = tmp();
   const s = Store.open(dir);
   s.appendMsg("user", "hi");
   const file = path.join(s.mainDir, fs.readdirSync(s.mainDir)[0]);
   const mk = (i: number, kind: string) => JSON.stringify({ i, kind, text: "t", size: 8, date: "2026-01-01T00:00:00.000Z" });
   fs.appendFileSync(file, mk(1, "tool") + "\n" + mk(2, "echo") + "\n" + mk(3, "talk") + "\n");
-  assert.deepEqual(Store.open(dir).msgs.map((m) => m.kind), ["user", "step", "step", "talk"]);
+  assert.deepEqual(Store.open(dir).msgs.map((m) => m.kind), ["user", "tool", "echo", "talk"]);
   fs.appendFileSync(file, mk(4, "bogus") + "\n");
   assert.throws(() => Store.open(dir), /unknown kind 'bogus'/);
 });
@@ -134,7 +134,7 @@ test("memory.add: if writing the free leaf fails, the message is still in the vi
 test("putNode on an existing node: memory is not ahead of the disk if the write fails", () => {
   const dir = tmp();
   const s = Store.open(dir);
-  const m = s.appendMsg("step", "x".repeat(900));
+  const m = s.appendMsg("tool", "x".repeat(900));
   s.putNode({ l: 0, i: 0, text: "old summary", size: 11, kinds: "s" });
   const undo = patchWrite(() => 0);
   try {

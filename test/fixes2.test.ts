@@ -119,7 +119,7 @@ test("9. a multi-byte character split across two socket chunks arrives intact", 
 
 test("10. one API message whose blocks arrive as several events is one usage row", () => {
   const svc = newService();
-  const st = { pending: new Map(), order: [], done: new Map(), logged: new Set(), usageSeen: new Set(), step: 0, initOk: true };
+  const st = { open: new Set(), logged: new Set(), usageSeen: new Set(), step: 0, initOk: true };
   const usage = { input_tokens: 5, output_tokens: 1 };
   svc.handleEvent({ type: "assistant", uuid: "e1", message: { id: "msg_1", usage, content: [{ type: "text", text: "a" }] } }, st as any);
   svc.handleEvent({ type: "assistant", uuid: "e2", message: { id: "msg_1", usage, content: [{ type: "tool_use", id: "t", name: "Bash", input: {} }] } }, st as any);

@@ -1,5 +1,6 @@
 import { Compactor, type CompactorOpts } from "./compactor.ts";
-import { MASTER_MARKS, VIEW } from "./constants.ts";
+import path from "node:path";
+import { COMPACTION_VIEW_HIGH, COMPACTION_VIEW_LOW, MASTER_MARKS, VIEW, VIEW_LOW } from "./constants.ts";
 import type { Model } from "./model.ts";
 import { Store } from "./store.ts";
 import { freeLeaf } from "./tree.ts";
@@ -10,13 +11,22 @@ import { cutPieces, View } from "./view.ts";
 export class Memory {
   readonly store: Store;
   readonly view: View;
+  /** What a compaction reads: the chat's view merged further (16-32 KB). Derived, so rebuilt at start. */
+  readonly ctxView: View;
   readonly compactor: Compactor;
 
-  constructor(chatDir: string, model: Model, opts: CompactorOpts & { budget?: number } = {}) {
+  constructor(chatDir: string, model: Model, opts: CompactorOpts & { budget?: number; low?: number } = {}) {
     this.store = Store.open(chatDir);
     for (const w of this.store.warnings) console.error(`store: ${w}`);
-    this.view = View.fold(this.store, opts.budget ?? VIEW);
-    this.compactor = new Compactor(this.store, this.view, model, opts);
+    // `budget` (tests) sets the high mark; the default is the sawtooth 128 KB -> 64 KB
+    const high = opts.budget ?? VIEW;
+    const low = opts.low ?? (opts.budget ? opts.budget : VIEW_LOW);
+    const file = path.join(chatDir, "view.json");
+    const { view } = View.load(this.store, file, high, low);
+    this.view = view;
+    this.view.onChange = () => this.view.save(file);
+    this.ctxView = View.fold(this.store, COMPACTION_VIEW_HIGH, COMPACTION_VIEW_LOW);
+    this.compactor = new Compactor(this.store, this.view, this.ctxView, model, opts);
   }
 
   /** Start the background pump (builds anything left unbuilt from a previous run). */
@@ -32,6 +42,7 @@ export class Memory {
       if (f) this.store.putNode(f);
     } finally {
       this.view.append(m.i); // the message is durable: the view must tile it even if the free leaf failed (pump retries it)
+      this.ctxView.append(m.i);
     }
     this.compactor.pump();
     return m;

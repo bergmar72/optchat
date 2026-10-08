@@ -4,18 +4,21 @@ import fs from "node:fs";
 import path from "node:path";
 import { msgs, newService } from "./helpers.ts";
 
-test("turn: items are logged with their own kind; talk and steps follow, steps in CALL order", async () => {
+test("turn: items are logged with their own kind; each call is logged as it starts, each result as an echo when it arrives", async () => {
   const svc = newService();
   svc.submit({ kind: "user", text: "SCRIPT:parallel hello" });
   await svc.idle();
   const log = msgs(svc);
   assert.equal(log[0], "user: SCRIPT:parallel hello");
-  const steps = log.filter((l) => l.startsWith("step: "));
-  assert.equal(steps.length, 2);
-  assert.match(steps[0], /^step: Read .*\n→ first$/); // a1 was called first, though b2 returned first
-  assert.match(steps[1], /^step: Bash .*\n→ second finished first$/);
+  // both calls are logged before either result (the fake returns b2 first, then a1)
+  const tools = log.filter((l) => l.startsWith("tool: "));
+  assert.equal(tools.length, 2);
+  assert.match(tools[0], /^tool: Read /);
+  assert.match(tools[1], /^tool: Bash /);
+  assert.ok(log.indexOf(tools[1]) < log.indexOf("echo: second finished first"), "the call precedes its echo");
+  assert.ok(log.indexOf("echo: second finished first") < log.indexOf("echo: first"), "echoes arrive in the order the results came back");
   assert.ok(log.includes("talk: both done"));
-  assert.ok(svc.mem.store.msgs.every((m) => m.kind !== "tool" as any));
+  assert.ok(!log.some((l) => l.startsWith("step: ")), "no step kind any more");
 });
 
 test("turn: a work report never becomes a user message, and the label reaches the agent", async () => {
@@ -65,7 +68,8 @@ test("turn: a crashed claude still leaves its steps in the log, with a note", as
   svc.submit({ kind: "user", text: "SCRIPT:crash go" });
   await svc.idle();
   const log = msgs(svc);
-  assert.ok(log.some((l) => /^step: Bash .*never returns.*\n→ \(no result/.test(l)));
+  assert.ok(log.some((l) => /^tool: Bash .*never returns/.test(l)));
+  assert.ok(log.some((l) => l === "echo: (no result: the turn ended)"));
   assert.ok(log.includes("talk: about to die"));
 });
 
@@ -91,8 +95,10 @@ test("recovery: a journal left by a crashed service is turned into log messages"
   (svc as any).recoverJournal();
   const log = msgs(svc);
   assert.ok(!log.includes("talk: I will build it")); // was already logged before the crash
-  assert.ok(log.some((l) => /^step: Bash .*make.*\n→ \(no result: harness restarted\)/.test(l)));
-  assert.ok(log.some((l) => /^step: Read .*\n→ file text/.test(l)));
+  assert.ok(log.some((l) => /^tool: Bash .*make/.test(l)));
+  assert.ok(log.some((l) => l === "echo: (no result: harness restarted)"));
+  assert.ok(log.some((l) => /^tool: Read /.test(l)));
+  assert.ok(log.some((l) => l === "echo: file text"));
   assert.equal(fs.existsSync(j), false);
 });
 

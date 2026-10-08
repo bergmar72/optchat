@@ -13,7 +13,7 @@ import { claimLock } from "./lock.ts";
 import { Memory } from "./memory.ts";
 import { type Model, usage as compactorUsage } from "./model.ts";
 import { decide, defaultPolicy, loadPolicy, type PolicyConfig } from "./policy.ts";
-import { MASTER, VIEW_DOC } from "./prompts.ts";
+import { SYSTEM } from "./prompts.ts";
 import { Tools } from "./tools.ts";
 import { type Paths, pathsFor } from "./paths.ts";
 import { capHeadTail, type Kind } from "./types.ts";
@@ -81,9 +81,8 @@ interface Confirm {
 }
 
 interface TurnState {
-  pending: Map<string, { name: string; input: any }>;
-  order: string[];
-  done: Map<string, string>;
+  /** Tool calls whose echo (result) has not been logged yet, by tool-use id. */
+  open: Set<string>;
   logged: Set<string>;
   usageSeen: Set<string>;
   step: number;
@@ -91,7 +90,7 @@ interface TurnState {
   initOk: boolean;
 }
 
-const newTurnState = (): TurnState => ({ pending: new Map(), order: [], done: new Map(), logged: new Set(), usageSeen: new Set(), step: 0, initOk: true });
+const newTurnState = (): TurnState => ({ open: new Set(), logged: new Set(), usageSeen: new Set(), step: 0, initOk: true });
 
 /** `apiKeySource` values that mean the SUBSCRIPTION login (measured: "none" with an OAuth login). Anything else may bill an API key. */
 const SUBSCRIPTION_SOURCES = new Set(["none", "oauth"]);
@@ -455,7 +454,7 @@ export class Service {
     } catch {
       // no instructions file
     }
-    return [MASTER, VIEW_DOC, agents].filter(Boolean).join("\n\n") + "\n";
+    return [SYSTEM, agents].filter(Boolean).join("\n\n") + "\n";
   }
 
   private childEnv(): Record<string, string> {
@@ -629,9 +628,9 @@ export class Service {
           if (b.type === "text" && String(b.text).trim()) this.logOnce(st, uid, "talk", b.text);
           else if (b.type === "thinking" && b.thinking) this.emit({ ev: "entry", kind: "thought", text: b.thinking }); // shown, never logged
           else if (b.type === "tool_use") {
-            st.pending.set(b.id, { name: String(b.name), input: b.input ?? {} });
-            st.order.push(b.id);
-            this.emit({ ev: "entry", kind: "tool", text: `${shortName(String(b.name))} ${capHeadTail(JSON.stringify(b.input ?? {}), 300)}` });
+            // logged as the call happens: a long tool run is visible in the log while it runs
+            st.open.add(String(b.id));
+            this.logOnce(st, String(b.id), "tool", `${shortName(String(b.name))} ${capHeadTail(JSON.stringify(b.input ?? {}) ?? "{}", STEP_INPUT_CAP)}`);
           }
         });
         break;
@@ -649,8 +648,9 @@ export class Service {
         if (Array.isArray(content))
           for (const b of content)
             if (b.type === "tool_result") {
-              st.done.set(b.tool_use_id, (b.is_error ? "error: " : "") + resultText(b.content));
-              this.flushSteps(st);
+              const id = String(b.tool_use_id);
+              st.open.delete(id);
+              this.logOnce(st, `${id}#echo`, "echo", capHeadTail((b.is_error ? "error: " : "") + resultText(b.content), CAP));
             }
         break;
       }
@@ -661,27 +661,10 @@ export class Service {
     }
   }
 
-  /** Log finished tool calls in call order, one `step` per call. */
-  private flushSteps(st: TurnState): void {
-    while (st.order.length && st.done.has(st.order[0])) {
-      const id = st.order.shift()!;
-      this.logStep(st, id, st.done.get(id)!);
-    }
-  }
-
+  /** A call that never got its result (the turn was stopped, or the harness restarted): say so, in call order. */
   private finishSteps(st: TurnState, note: string): void {
-    this.flushSteps(st);
-    // An earlier call that never returned blocked the rest: log them in call order,
-    // each with its own result if it has one.
-    for (const id of st.order.splice(0)) this.logStep(st, id, st.done.get(id) ?? note);
-  }
-
-  private logStep(st: TurnState, id: string, result: string): void {
-    const p = st.pending.get(id);
-    if (!p) return;
-    st.pending.delete(id);
-    const text = `${shortName(p.name)} ${capHeadTail(JSON.stringify(p.input ?? {}) ?? "{}", STEP_INPUT_CAP)}\n→ ${capHeadTail(String(result), CAP)}`;
-    this.logOnce(st, id, "step", text);
+    for (const id of st.open) this.logOnce(st, `${id}#echo`, "echo", note);
+    st.open.clear();
   }
 
   private logUsage(st: TurnState, msg: any): void {

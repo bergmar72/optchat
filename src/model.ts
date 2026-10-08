@@ -34,48 +34,26 @@ export const usage = {
 };
 
 /**
- * Claude Sonnet 5.5, medium effort, through the API key (not the subscription:
- * the compactor needs exact cache control and must not stop at a usage limit).
- * Thinking is left at its default (adaptive); thinking blocks are echoed back
- * unchanged in retries, and are never logged.
+ * The compactor's model, through the API key (not the subscription: a compaction must not stop at a usage
+ * limit). The system prompt is cached; the context and the task are the user turn.
  */
 export class AnthropicModel implements Model {
-  /** Server-side refusal fallbacks. Turned off for good if the API rejects them. */
-  fallbacks = process.env.OPTCHAT_FALLBACKS !== "0";
-
   constructor(
     private client: Anthropic,
     private model = COMPACTOR_MODEL,
-    private effort: "low" | "medium" | "high" = "medium",
   ) {}
 
   async ask(system: string, turns: ChatTurn[]): Promise<{ text: string; content: any[] }> {
-    const params: any = {
-      model: this.model,
-      max_tokens: 16_000,
-      system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
-      messages: turns,
-      output_config: { effort: this.effort },
-    };
-    // Decide by what THIS request was sent with, not by the live flag: 8 calls run at once,
-    // and a sibling may already have turned fallbacks off.
-    const used = this.fallbacks;
     let res: any;
     try {
-      res = used
-        ? await this.client.beta.messages.create({ ...params, betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" } as any)
-        : await this.client.messages.create(params);
+      res = await this.client.messages.create({
+        model: this.model,
+        max_tokens: 16_000,
+        system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
+        messages: turns,
+      } as any);
     } catch (e: any) {
-      if (e instanceof Anthropic.BadRequestError) {
-        if (used && /fallback/i.test(e.message)) {
-          if (this.fallbacks) {
-            this.fallbacks = false;
-            console.error(`compactor: API rejected fallbacks (${e.message}); continuing without`);
-          }
-          return this.ask(system, turns);
-        }
-        throw Object.assign(new PermanentError(`API rejected the request: ${e.message}`), { cause: e });
-      }
+      if (e instanceof Anthropic.BadRequestError) throw Object.assign(new PermanentError(`API rejected the request: ${e.message}`), { cause: e });
       throw e;
     }
     usage.add(res.usage); // refused and truncated calls are billed too
@@ -89,12 +67,7 @@ export class AnthropicModel implements Model {
       case "pause_turn":
         throw new Error("the API paused the turn");
     }
-    // Text before a fallback block is the declining model's partial output: only what follows is the answer.
-    const blocks: any[] = res.content;
-    let from = 0;
-    blocks.forEach((b, k) => b.type === "fallback" && (from = k + 1));
-    const text = blocks
-      .slice(from)
+    const text = (res.content as any[])
       .filter((b) => b.type === "text")
       .map((b) => b.text)
       .join("");
@@ -111,8 +84,8 @@ export class TruncModel implements Model {
   async ask(_system: string, turns: ChatTurn[]): Promise<{ text: string; content: any[] }> {
     const first = turns[0].content;
     const all = typeof first === "string" ? first : first.map((b: any) => b.text ?? "").join("");
-    const body = all.split(/in at most \d+ bytes:\n/).pop() ?? all;
-    const text = body.replace(/\s+/g, " ").trim().slice(0, 200) || "(empty)";
+    const input = /<input>\n([^]*?)\n<\/input>/.exec(all)?.[1] ?? all; // the task's <input> block
+    const text = input.replace(/\s+/g, " ").trim().slice(0, 200) || "(empty)";
     return { text, content: [{ type: "text", text }] };
   }
 }

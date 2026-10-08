@@ -82,18 +82,19 @@ try {
   const checks = {
     "talk replies logged": !!kinds.talk,
     "the confirmed bash command ran": fs.existsSync(path.join(work, "marker.txt")),
-    "steps logged (one per tool call)": (kinds.step ?? 0) >= 3,
+    "tool calls and echoes logged": (kinds.tool ?? 0) >= 3 && (kinds.echo ?? 0) >= 3,
     "a confirmation was asked for the bash write": confirms.some((m) => /touch/.test(m.why)),
     "Read inside work was allowed without asking": !confirms.some((m) => /note\.txt/.test(m.why)),
     "turn 2 recalled PELICAN-77": msgs.some((m) => m.kind === "talk" && /PELICAN-77/i.test(m.text)),
     "the file record gives an absolute path": /^path: \//m.test(fileRec?.text ?? ""),
     "the agent opened the saved paper (ZEBRA-42)": /ZEBRA-42/.test(last?.text ?? ""),
     "Grep ran, and the .env line never came back (updatedInput honoured)": (() => {
-      const g = msgs.filter((m) => m.kind === "step" && /^Grep /.test(m.text));
+      const g = msgs.filter((m) => m.kind === "tool" && /^Grep /.test(m.text));
       // both files contain the string: "Found 1 file" (the readme) proves the .env was excluded
-      return g.some((m) => /Found 1 file/.test(m.text) && /readme\.txt/.test(m.text) && !/\.env/.test(m.text.split("→")[1] ?? "")) && !msgs.some((m) => /hunter2-SECRET/.test(m.text) && m.kind !== "user");
+      const r = msgs.filter((m) => m.kind === "echo" && /Found 1 file/.test(m.text));
+      return g.length > 0 && r.some((m) => /readme\.txt/.test(m.text) && !/\.env/.test(m.text)) && !msgs.some((m) => /hunter2-SECRET/.test(m.text) && m.kind !== "user");
     })(),
-    "no tool call was denied as protected": !msgs.some((m) => m.kind === "step" && /is protected/.test(m.text)),
+    "no tool call was denied as protected": !msgs.some((m) => m.kind === "echo" && /is protected/.test(m.text)),
     "usage logged": usage.length > 0,
   };
   console.log("\nCHECKS"); for (const [k, v] of Object.entries(checks)) console.log(`  ${v ? "PASS" : "FAIL"}  ${k}`);
