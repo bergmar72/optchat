@@ -109,7 +109,7 @@ test("view: an unbuilt part renders a placeholder, and settle waits for it", asy
   const v = new View(s);
   v.append(0);
   assert.match(v.lines()[0], /^0\+1\|o\|\(not summarized yet/);
-  assert.equal(v.first(), 0);
+  assert.equal(v.settled(), false);
   let done = false;
   const p = v.settle().then((r) => ((done = true), r));
   await new Promise((r) => setTimeout(r, 10));

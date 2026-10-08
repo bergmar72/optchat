@@ -6,6 +6,7 @@ import { summarize, PERMANENT_TRIES } from "../src/compactor.ts";
 import { AnthropicModel, PermanentError, usage, type ChatTurn, type Model } from "../src/model.ts";
 import { capHeadTail } from "../src/types.ts";
 import { tmp } from "./helpers.ts";
+import { leafTask } from "../src/prompts.ts";
 
 const text = (t: ChatTurn) => (typeof t.content === "string" ? t.content : t.content.map((b: any) => b.text ?? "").join(""));
 
@@ -39,10 +40,10 @@ test("summarize: a failure on a later round returns the shortest line so far", a
       return { text: t, content: [{ type: "text", text: t }] };
     },
   };
-  assert.equal(await summarize(model, [], "Compress"), "a".repeat(600));
+  assert.equal(await summarize(model, [], leafTask(0, "user", "x")), "a".repeat(600));
   let e = 0;
   const empty: Model = { async ask() { return e++ ? { text: "  ", content: [] } : { text: "b".repeat(600), content: [{ type: "text", text: "b".repeat(600) }] }; } };
-  assert.equal(await summarize(empty, [], "Compress"), "b".repeat(600));
+  assert.equal(await summarize(empty, [], leafTask(0, "user", "x")), "b".repeat(600));
 });
 
 test("a poison message gets a mechanical line after a few identical failures, and the chat moves on", async () => {

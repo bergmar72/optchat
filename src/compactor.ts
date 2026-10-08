@@ -7,21 +7,32 @@ import { bytes, capHeadTail, cutBytes, flat, key, span, startOf } from "./types.
 import type { View } from "./view.ts";
 
 /**
+ * The context as request blocks (optchat.md section 3.3): the lines in blocks of 4, so an appended line leaves
+ * the full blocks untouched. A cache mark sits on the last whole block, and one on the request's end (the task).
+ */
+export function contextBlocks(lines: string[], task: string): any[] {
+  const mark = { type: "ephemeral" };
+  const blocks: any[] = [];
+  const whole = Math.floor(lines.length / 4);
+  if (!lines.length) blocks.push({ type: "text", text: "<chat>\n" });
+  for (let g = 0; g * 4 < lines.length; g++) {
+    const group = lines.slice(g * 4, g * 4 + 4);
+    const block: any = { type: "text", text: (g === 0 ? "<chat>\n" : "") + group.join("\n") + "\n" };
+    if (group.length === 4 && g === whole - 1) block.cache_control = mark;
+    blocks.push(block);
+  }
+  blocks.push({ type: "text", text: "</chat>" });
+  blocks.push({ type: "text", text: task, cache_control: mark });
+  return blocks;
+}
+
+/**
  * One compaction: the compaction view (`context`, bare lines) and its task. Up to TRIES rounds in the same
  * conversation, each told the length of its own line; returns the shortest line it got. A later round that
  * fails keeps the earlier lines. (optchat.md section 4.)
  */
 export async function summarize(model: Model, context: string[], task: string): Promise<string> {
-  const chat = `<chat>\n${context.join("\n")}\n</chat>`;
-  const turns: ChatTurn[] = [
-    {
-      role: "user",
-      content: [
-        { type: "text", text: chat, cache_control: { type: "ephemeral" } },
-        { type: "text", text: task },
-      ],
-    },
-  ];
+  const turns: ChatTurn[] = [{ role: "user", content: contextBlocks(context, task) }];
   const tries: string[] = [];
   for (;;) {
     let reply;
@@ -67,6 +78,8 @@ export class Compactor {
   gen = 0;
   paused = false;
   private failures = new Map<string, number>();
+  /** Failed nodes: not retried before this time, unless a new message comes (pump(true)). */
+  private cool = new Map<string, number>();
   private front: number[] = [];
   private jobs: number;
   private retryMs: number;
@@ -95,8 +108,9 @@ export class Compactor {
    * first message that cannot start yet (the unbuilt-ahead limit, or the job slots), so the cost is bounded by
    * what can start now, not by the backlog.
    */
-  pump(): void {
+  pump(force = false): void {
     if (this.paused) return;
+    const now = Date.now();
     const T = this.store.total;
     let changed = false;
     for (let l = 0; 2 ** l <= T; l++) {
@@ -109,6 +123,7 @@ export class Compactor {
       const visit = (i: number, ahead: number): boolean => {
         const k = key(l, i);
         if (this.busy.has(k)) return true;
+        if (!force && (this.cool.get(k) ?? 0) > now) return true; // a failed node waits for its retry time
         let a, b;
         if (l > 0) {
           if (!this.built(l - 1, 2 * i) || !this.built(l - 1, 2 * i + 1)) return true;
@@ -217,7 +232,11 @@ export class Compactor {
         this.log(`compactor: node ${name}: even the mechanical line failed: ${e?.message ?? e}`);
       }
     }
-    setTimeout(() => this.pump(), this.retryMs);
+    this.cool.set(k, Date.now() + this.retryMs);
+    setTimeout(() => {
+      this.cool.delete(k);
+      this.pump();
+    }, this.retryMs);
   }
 
   /** Resolves once nothing is left to build. */

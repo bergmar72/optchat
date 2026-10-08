@@ -9,9 +9,6 @@ export const CAP = 30_000; // max chars of one tool result (head + tail kept)
 export const STEP_INPUT_CAP = 4_000; // max chars of a logged tool-call input
 export const PLACEHOLDER = "(not summarized yet: zoom it)";
 
-// Cache breakpoints inside the view, in characters.
-// The compactor calls the API directly (system + 3 view marks = 4 breakpoints).
-export const COMPACTOR_MARKS = [50_000, 80_000, 100_000];
 // Through `claude -p` only ONE view mark fits: Claude Code uses 3 of the 4
 // allowed breakpoints itself (docs/cli-findings.md, S2a).
 // Measured: with one mark the next turn re-reads the view up to it (docs/cli-findings.md).
@@ -25,6 +22,9 @@ export const MASTER_TOOLS = ["Bash", "Read", "Edit", "Write", "Glob", "Grep", "W
 /** Our own MCP tools. Always allowed by the policy and by --allowedTools; listed here once. */
 export const OWN_TOOLS = ["zoom", "date", "search"] as const;
 export const ownToolName = (n: string): string => `mcp__optchat__${n}`;
+
+/** View files are saved this long after the last change (a flush at turn end and at shutdown saves the rest). */
+export const SAVE_DELAY_MS = 1000;
 
 export const AUTONOMY_LIMIT = 3; // consecutive turns not started by the user
 export const CONFIRM_TIMEOUT_MS = 15 * 60_000;

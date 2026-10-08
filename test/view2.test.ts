@@ -44,8 +44,9 @@ test("view.json: a restart restores the saved view without rebuilding it, and th
   const mem = new Memory(dir, new TruncModel(), { budget: 5000, low: 2500, retryMs: 5, log: () => {} });
   for (let i = 0; i < 60; i++) mem.add(i % 2 ? "talk" : "user", `message ${i} ` + "q".repeat(300));
   await mem.compactor.whenIdle();
+  mem.flush();
   const saved = JSON.parse(fs.readFileSync(path.join(dir, "view.json"), "utf8"));
-  assert.deepEqual(saved, mem.view.parts.map((p) => [p.l, p.i]));
+  assert.deepEqual(saved.parts, mem.view.parts.map((p) => [p.l, p.i]));
   const again = new Memory(dir, new TruncModel(), { budget: 5000, low: 2500, retryMs: 5, log: () => {} });
   assert.deepEqual(again.view.parts, mem.view.parts);
   again.add("user", "after the restart " + "r".repeat(300));
@@ -64,4 +65,50 @@ test("view.json damaged or out of step with the log: it is ignored and the view 
   fs.writeFileSync(path.join(dir, "view.json"), JSON.stringify([[0, 0], [0, 99]]));
   const wrong = new Memory(dir, new TruncModel(), { budget: 5000, low: 2500, retryMs: 5, log: () => {} });
   assert.equal(wrong.view.parts.reduce((n, p) => n + 2 ** p.l, 0), 8);
+  // entries that are not pairs, or not numbers, fall back too (this used to throw out of the constructor)
+  for (const bad of [[null], [1], [[0]], [["a", 0]], { parts: [null] }]) {
+    fs.writeFileSync(path.join(dir, "view.json"), JSON.stringify(bad));
+    const m = new Memory(dir, new TruncModel(), { budget: 5000, low: 2500, retryMs: 5, log: () => {} });
+    assert.equal(m.view.parts.reduce((n, p) => n + 2 ** p.l, 0), 8, JSON.stringify(bad));
+  }
+});
+
+test("a batch that was waiting when the service stopped resumes as draining", () => {
+  const s = Store.open(tmp());
+  const v = new View(s, 500, 250);
+  for (let i = 0; i < 4; i++) {
+    const m = s.appendMsg("user", `m${i}`);
+    s.putNode(leafNode(m, "x".repeat(200)));
+    v.append(i, i + 1); // no parents yet: the batch waits
+  }
+  assert.equal((v as any).draining, true);
+  const file = path.join(tmp(), "view.json");
+  v.save(file);
+  const back = View.load(s, file, 500, 250).view;
+  assert.equal((back as any).draining, true);
+  assert.deepEqual(back.parts, v.parts);
+});
+
+test("the compaction view is saved and restored too, and is not refolded", async () => {
+  const dir = tmp();
+  const mem = new Memory(dir, new TruncModel(), { budget: 5000, low: 2500, retryMs: 5, log: () => {} });
+  for (let i = 0; i < 30; i++) mem.add("user", `m${i} ` + "q".repeat(300));
+  await mem.compactor.whenIdle();
+  mem.flush();
+  const again = new Memory(dir, new TruncModel(), { budget: 5000, low: 2500, retryMs: 5, log: () => {} });
+  assert.deepEqual(again.ctxView.parts, mem.ctxView.parts);
+  assert.ok(fs.existsSync(path.join(dir, "compaction-view.json")));
+});
+
+test("a view file that cannot be written does not fail add(): the message is kept, the save is retried later", async () => {
+  const dir = tmp();
+  fs.mkdirSync(path.join(dir, "view.json")); // a directory where the file should be: every save fails
+  const logs: string[] = [];
+  const mem = new Memory(dir, new TruncModel(), { budget: 5000, low: 2500, retryMs: 5, log: (m) => logs.push(m) });
+  for (let i = 0; i < 20; i++) assert.doesNotThrow(() => mem.add("user", `m${i} ` + "q".repeat(300)));
+  assert.equal(mem.store.total, 20);
+  assert.equal(mem.ctxView.parts.reduce((n, p) => n + 2 ** p.l, 0), 20); // the compaction view still tiles the chat
+  mem.flush();
+  assert.ok(logs.some((l) => /could not save/.test(l)));
+  await mem.compactor.whenIdle();
 });

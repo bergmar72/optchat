@@ -14,7 +14,7 @@ covered by Phase 0.
 
 ## 0. Implementation status (2026-10-05)
 
-Built and tested on Linux x64 (`npm test`: 155 tests; `node test/e2e.mjs` and
+Built and tested on Linux x64 (`npm test`: 158 tests; `node test/e2e.mjs` and
 `node test/probe-cache.mjs` run against the real `claude`). Phase 0 results are in
 [docs/cli-findings.md](docs/cli-findings.md).
 
@@ -46,7 +46,7 @@ Built and tested on Linux x64 (`npm test`: 155 tests; `node test/e2e.mjs` and
 
 ### Review round: what was fixed (Tier 1 and Tier 2), 2026-10-05
 
-Eleven agents reviewed the code; their ~60 distinct findings were reproduced or checked and fixed with tests (now 155 unit tests, a live end-to-end run against the real `claude` with 11 checks, and the cache probe).
+Eleven agents reviewed the code; their ~60 distinct findings were reproduced or checked and fixed with tests (now 158 unit tests, a live end-to-end run against the real `claude` with 11 checks, and the cache probe).
 
 - **Durability.** Short writes are looped (`appendDurable`, `writeAtomic`); a failed append is cut back; a torn tail is dropped from the file at load; a bad line in the MIDDLE of the log, a gap in the ids, or an unknown kind **refuses to start** instead of silently losing what follows. Base-spec `tool`/`echo` kinds load as steps. A message is written to `run/inbox.jsonl` before `submit()` returns and answered after a crash (once).
 - **Compactor.** Its context is bare text (no `id+n|k|`). A failed retry keeps the earlier tries; a node that fails the same way 4 times gets a marked mechanical line so one poison message cannot block the chat; an exception while saving is retried; the fallback-disable race is gone; usage is counted for refused calls; text before a fallback block is ignored.
@@ -75,8 +75,18 @@ The spec changed in four places. Implemented as written:
 3. **The `k` column** in the view (`id+n|k|text`): the spec drops it. Kept, because the setup spec (section 6.1) requires kind metadata on each view line.
 4. **The `search` tool.** The spec allows only `zoom`/`date`. Kept, because the setup spec (section 6.1) requires raw search. The prompt says to use it only when zoom cannot find a fact.
 5. **Compaction cache.** The spec has compactions read the turns' cache (same prefix, same model). Here the master runs on the subscription (Opus/Sonnet) and the compactor on the API (Haiku), and caches are per model and per account. So compactions do not share the master's cache. This cannot be fixed inside the spec; it costs API tokens for the compaction view on every call.
-6. **Compactor quality.** Haiku 4.5 with no effort, not "Haiku at xhigh". Check summary quality on a real chat before trusting it.
+6. **Compactor quality.** Haiku 4.5 with no effort: the spec's "xhigh" is not implemented (Haiku 4.5 rejects the effort setting, so there is no equivalent). Check summaries on a real chat before trusting them.
 7. **Not yet done:** "or when the chat's view merges" (the compaction view merges on its own schedule); the `work` format `[Name]` (no subagents yet). The "fewer than 8 unbuilt lines" rule counts messages, not view lines (after merges there are fewer lines).
+
+### Review round 2 (fixed 2026-10-08)
+
+- Compaction context: 4-line blocks, one mark on the last whole block, one on the task (spec 3.3).
+- `view.json` is `{parts, draining}`; a damaged file of any shape falls back to a fold; a waiting batch resumes as it was.
+- Saves are debounced (1 s) and flushed at turn end and shutdown. A failed save is logged, never thrown from `add()`.
+- The compaction view is saved as `compaction-view.json` and restored, not refolded.
+- A failed node waits its retry time; a new message retries it at once.
+- Legacy `step` lines load as `tool`.
+- Removed: `COMPACTOR_MARKS`, `View.first()`.
 
 ### Known remaining (not fixed)
 

@@ -89,6 +89,7 @@ export class Store {
     for (const file of this.files(this.mainDir)) {
       this.readLines(file).forEach((line, idx) => {
         const m = this.parseLine<Msg>(file, line, idx + 1);
+        if ((m.kind as string) === "step") m.kind = "tool"; // chats written before tool/echo were split: the call and its result stay together as text
         if (!KINDS.includes(m.kind)) throw new StoreError(`${file}: line ${idx + 1} has unknown kind '${m.kind}'. Refusing to start.`);
         if (m.i < this.msgs.length) {
           this.warnings.push(`duplicate message id ${m.i} in ${file}; the first one is kept`);

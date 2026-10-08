@@ -58,29 +58,35 @@ export class View {
    * view differs from the live one and every cache entry dies. A missing or damaged file falls back to a fold.
    */
   static load(store: Store, file: string, high = VIEW, low = high): { view: View; restored: boolean } {
-    let pairs: Array<[number, number]> | undefined;
+    const fold = () => ({ view: View.fold(store, high, low), restored: false });
+    let raw: any;
     try {
-      pairs = JSON.parse(fs.readFileSync(file, "utf8"));
+      raw = JSON.parse(fs.readFileSync(file, "utf8"));
     } catch {
-      pairs = undefined;
+      return fold(); // missing or not JSON
     }
-    if (!Array.isArray(pairs)) return { view: View.fold(store, high, low), restored: false };
+    // the current format is { parts, draining }; the first format was a bare list of pairs
+    const pairs: unknown = Array.isArray(raw) ? raw : raw?.parts;
+    if (!Array.isArray(pairs)) return fold();
     const v = new View(store, high, low);
     let at = 0;
-    for (const [l, i] of pairs) {
-      if (!Number.isInteger(l) || !Number.isInteger(i) || l < 0 || i < 0 || startOf(l, i) !== at || at + span(l) > store.total)
-        return { view: View.fold(store, high, low), restored: false };
+    for (const e of pairs) {
+      if (!Array.isArray(e) || e.length !== 2) return fold();
+      const [l, i] = e;
+      if (!Number.isInteger(l) || !Number.isInteger(i) || l < 0 || i < 0) return fold();
+      if (startOf(l, i) !== at || at + span(l) > store.total) return fold(); // not a tiling of a prefix of the log
       v.parts.push({ l, i });
       at += span(l);
     }
+    v.draining = !Array.isArray(raw) && raw?.draining === true; // a batch that was waiting resumes where it was
     v.size = v.parts.reduce((n, p) => n + v.lineBytes(p), 0);
     for (let k = at; k < store.total; k++) v.append(k, k + 1);
     return { view: v, restored: true };
   }
 
-  /** Save the parts, atomically. Pairs only: a few bytes per line. */
+  /** Save the parts and whether a batch is waiting, atomically. A few bytes per line. */
   save(file: string): void {
-    writeAtomic(file, JSON.stringify(this.parts.map((p) => [p.l, p.i])) + "\n");
+    writeAtomic(file, JSON.stringify({ parts: this.parts.map((p) => [p.l, p.i]), draining: this.draining }) + "\n");
   }
 
   private measure(p: Part): number {
@@ -145,11 +151,6 @@ export class View {
   }
 
   /** First message whose view line is not a built summary (T if none). */
-  first(): number {
-    for (const p of this.parts) if (!this.store.hasNode(p.l, p.i)) return startOf(p.l, p.i);
-    return this.store.total;
-  }
-
   settled(): boolean {
     return this.parts.every((p) => this.store.hasNode(p.l, p.i));
   }

@@ -414,6 +414,7 @@ export class Service {
       }
     } finally {
       this.turning = false;
+      this.mem.flush(); // the view files catch up at each turn end, not only a second after a change
       this.emit({ ev: "status", text: "idle" });
       for (const w of this.idleWaiters.splice(0)) w();
     }
@@ -812,6 +813,7 @@ export class Service {
 
   async shutdown(): Promise<void> {
     this.cancel();
+    this.mem.flush();
     for (let k = 0; k < 250 && this.child; k++) await new Promise((r) => setTimeout(r, 50));
     this.server?.close();
     try {

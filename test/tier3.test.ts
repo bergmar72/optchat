@@ -212,17 +212,27 @@ test("summarize: an empty first reply is a permanent failure; the assistant turn
   assert.equal(seen[1][1].content, first); // the very same blocks, thinking signature and all
 });
 
-test("summarize: the context is one <chat> block with one cache mark; the task is the second block and is not cached", async () => {
+test("summarize: the context is in blocks of 4 lines; one mark on the last whole block, one on the request's end", async () => {
   const blocks: any[][] = [];
   const model: Model = { async ask(_s, turns) { blocks.push(turns[0].content as any[]); return { text: "ok", content: [{ type: "text", text: "ok" }] }; } };
   const task = leafTask(0, "user", "x");
-  await summarize(model, ["short line"], task);
-  assert.equal(blocks[0][0].text, "<chat>\nshort line\n</chat>");
-  assert.deepEqual(blocks[0][0].cache_control, { type: "ephemeral" });
-  assert.equal(blocks[0][1].text, task);
-  assert.equal(blocks[0][1].cache_control, undefined);
-  await summarize(model, [], task);
-  assert.equal(blocks[1][0].text, "<chat>\n\n</chat>"); // an empty compaction view is still a valid block
+  await summarize(model, ["a", "b"], task);
+  const small = blocks[0];
+  assert.equal(small[0].text, "<chat>\na\nb\n");
+  assert.equal(small.filter((b: any) => b.cache_control).length, 1); // only the task: no whole block yet
+  assert.deepEqual(small.at(-1).cache_control, { type: "ephemeral" });
+  assert.equal(small.at(-1).text, task);
+  assert.equal(small.at(-2).text, "</chat>");
+  await summarize(model, Array.from({ length: 9 }, (_, i) => `L${i}`), task); // two whole blocks (8 lines) and one line left
+  const big = blocks[1];
+  assert.equal(big[0].text, "<chat>\nL0\nL1\nL2\nL3\n");
+  assert.equal(big[1].text, "L4\nL5\nL6\nL7\n");
+  assert.deepEqual(big[1].cache_control, { type: "ephemeral" }); // the last whole block
+  assert.equal(big[0].cache_control, undefined);
+  assert.equal(big[2].text, "L8\n");
+  assert.equal(big.filter((b: any) => b.cache_control).length, 2);
+  // the joined text is the plain context
+  assert.equal(big.slice(0, -1).map((b: any) => b.text).join(""), "<chat>\n" + Array.from({ length: 9 }, (_, i) => `L${i}\n`).join("") + "</chat>");
 });
 
 /** A model whose merge calls wait for a gate: leaves answer at once. */
